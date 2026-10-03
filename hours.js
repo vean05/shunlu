@@ -125,6 +125,31 @@ export function minToHHMM(min) {
 // 返回某个地点在 date 那天的营业窗口：
 //   { known: false } 不知道营业时间
 //   { known: true, windows: [[openMin, closeMin]...], source: 'manual'|'osm' }（空数组 = 当天休息）
+// App 告诉我们哪天是公共假期（营业时间里的「PH」规则要用）
+let isHoliday = () => false;
+export function setHolidayCheck(fn) {
+  isHoliday = fn;
+}
+
+// 「PH off」「PH 10:00-14:00」：公共假期那天的营业时间；没写就返回 null
+function holidayWindows(raw) {
+  const m = /(?:^|;)\s*PH\s+([^;]+)/.exec(raw || '');
+  if (!m) return null;
+  const tp = m[1].trim();
+  if (/^(off|closed)$/i.test(tp)) return [];
+  const out = [];
+  for (const seg of tp.split(',')) {
+    const r = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\+?$/.exec(seg.trim());
+    if (!r) return null;
+    const o = parseTime(r[1]);
+    let c = parseTime(r[2]);
+    if (o == null || c == null) return null;
+    if (c <= o) c += 1440;
+    out.push([o, c]);
+  }
+  return out;
+}
+
 export function placeHoursOn(place, date) {
   const day = date.getDay();
   if (place.manual) {
@@ -138,5 +163,9 @@ export function placeHoursOn(place, date) {
   }
   const week = parseOpeningHours(place.hoursRaw, date.getMonth());
   if (!week) return { known: false };
+  if (isHoliday(date)) {
+    const ph = holidayWindows(place.hoursRaw);
+    if (ph) return { known: true, windows: ph, source: 'osm', holiday: true };
+  }
   return { known: true, windows: windowsForDay(week, day), source: 'osm' };
 }

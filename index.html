@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- 所有文件都放在同一层（没有文件夹），上传 GitHub 比较方便。改了 style.css / app.js 就把 v= 加一，手机才会拿到新版 -->
-  <link rel="stylesheet" href="style.css?v=21">
+  <link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
 
@@ -63,6 +63,18 @@
           <div class="ic-main"><b>把顺路装到手机桌面</b><span id="installText">像 App 一样全屏打开，速度更快</span></div>
           <button type="button" id="installGo" class="primary">安装</button>
           <button type="button" id="installX" class="icon-btn sm" aria-label="不用了"><span data-ic="x"></span></button>
+        </div>
+
+        <!-- iPhone：7 天没打开会被清掉，提醒加到主屏幕 -->
+        <div id="iosWarn" class="safety-card warn" hidden>
+          <div class="sc-main"><b>⚠️ iPhone 要注意：7 天没打开，Safari 会清掉行程</b>
+            <span>按 Safari 下面的 <b>分享</b> → 「<b>加入主屏幕</b>」，装成 App 就不会被清。也可以先备份一份。</span></div>
+          <div class="sc-btns"><button type="button" id="iosWarnBackup" class="primary">先备份</button><button type="button" id="iosWarnX" class="link">知道了</button></div>
+        </div>
+        <!-- 很久没备份 -->
+        <div id="backupNag" class="safety-card" hidden>
+          <div class="sc-main"><b>备份一下行程？</b><span>换手机、清除浏览器资料，行程就会不见。<span class="bn-sub"></span></span></div>
+          <div class="sc-btns"><button type="button" id="backupNagGo" class="primary">备份</button><button type="button" id="backupNagX" class="link">以后</button></div>
         </div>
 
         <!-- 第一次用：三步说明（有行程后就不显示） -->
@@ -232,6 +244,7 @@
     <header id="mapTop">
       <button id="mapBack" class="icon-btn" aria-label="返回"><span data-ic="back"></span></button>
       <div class="mt-title"><div id="tripTitle"></div><div id="tripSub"></div></div>
+      <span id="netBadge" class="net-badge" hidden>离线中</span>
       <span class="icon-btn"></span>
     </header>
     <div id="mapLegend" hidden></div>
@@ -258,6 +271,7 @@
     <div id="fabs">
       <button id="btnLocate" class="fab" title="跟着我走" aria-label="跟着我走"><span data-ic="locate"></span></button>
       <button id="btnFit" class="fab" title="看全部路线" aria-label="看全部路线"><span data-ic="fit"></span></button>
+      <button id="btnFuel" class="fab" title="路上的油站" aria-label="路上的油站"><span data-ic="fuel"></span></button>
       <button id="btnAdd" class="fab-add" aria-label="加地点"><span data-ic="plus"></span><span>地点</span></button>
     </div>
     <!-- 地图分页：下一站卡片 -->
@@ -335,7 +349,10 @@
           <button id="btnCalendar"><span data-ic="calendar"></span><div><b>加进手机日历</b><span>每一站变成日历活动，到时间会提醒（自己选要不要）</span></div></button>
           <button id="btnBudget"><span data-ic="wallet"></span><div><b>花费 / 预算</b><span>门票估计、记录每天花了多少</span></div></button>
           <button id="btnAI"><span data-ic="sparkles"></span><div><b>问 AI 建议</b><span>复制行程，贴到 ChatGPT / Gemini</span></div></button>
+          <button id="btnBackup"><span data-ic="download"></span><div><b>备份全部行程</b><span>存成一个文件；换手机时在首页「导入备份」</span></div></button>
         </div>
+        <div class="more-sec">设定</div>
+        <div id="settingsBox" class="settings-box"></div>
       </div>
     </section>
 
@@ -413,6 +430,7 @@
         <div class="small muted" id="pdTicketHint"></div>
       </div>
       <label id="pdDayWrap">安排在哪一天<select id="pdDay"></select></label>
+      <label>门票 / 预约<select id="pdBooking"><option value="">不用预约</option><option value="need">要预约 / 买票（还没买，出发前提醒我）</option><option value="done">已经预约 / 买好了</option></select></label>
       <label>备注<textarea id="pdNote" rows="2" placeholder="例如：要先买票、想吃的店"></textarea></label>
       <div class="dialog-actions">
         <button type="button" id="pdDelete" class="danger">删除</button>
@@ -584,6 +602,6 @@
   <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script type="module" src="app.js?v=21"></script>
+  <script type="module" src="app.js?v=22"></script>
 </body>
 </html>

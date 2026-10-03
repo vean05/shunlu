@@ -3,7 +3,7 @@
 // 节点编号：0 = 起点，1..n = 要去的地点，n+1 = 终点（只有"回酒店"时才有）
 // ctx = {
 //   n,                     地点数量
-//   travel(i, j),          i 到 j 的交通时间（毫秒）
+//   travel(i, j, t),       i 到 j 的交通时间（毫秒）；t = 出发时间（尖峰时间开车会久一点）
 //   startTime,             出发时间（毫秒时间戳）
 //   stay[k],               第 k 个地点（1..n）停留时间（毫秒）
 //   windows[k],            第 k 个地点营业窗口 [[openMs, closeMs], ...]，null = 不知道（当作一直开）
@@ -92,7 +92,7 @@ export function evaluate(ctx, order) {
   const stops = [];
   for (const k of order) {
     const t0 = t;
-    t += ctx.travel(prev, k);
+    t += ctx.travel(prev, k, t);
     const v = visit(ctx, k, t);
     const m = addMeals(ctx, t0, v.depart);
     penalty += v.penalty + m.pen;
@@ -102,7 +102,7 @@ export function evaluate(ctx, order) {
   }
   let endArrive = null;
   if (ctx.hasEnd) {
-    t += ctx.travel(prev, ctx.n + 1);
+    t += ctx.travel(prev, ctx.n + 1, t);
     endArrive = t;
   }
   penalty += latePenalty(ctx, t);
@@ -120,7 +120,7 @@ function solveDP(ctx) {
   const parent = new Int8Array(size).fill(-1);
 
   for (let j = 0; j < n; j++) {
-    const v = visit(ctx, j + 1, ctx.startTime + ctx.travel(0, j + 1));
+    const v = visit(ctx, j + 1, ctx.startTime + ctx.travel(0, j + 1, ctx.startTime));
     const m = addMeals(ctx, ctx.startTime, v.depart);
     const idx = (1 << j) * n + j;
     cost[idx] = m.d - ctx.startTime + v.penalty + m.pen;
@@ -136,7 +136,7 @@ function solveDP(ctx) {
       const t0 = time[cur];
       for (let nxt = 0; nxt < n; nxt++) {
         if (mask & (1 << nxt)) continue;
-        const v = visit(ctx, nxt + 1, t0 + ctx.travel(last + 1, nxt + 1));
+        const v = visit(ctx, nxt + 1, t0 + ctx.travel(last + 1, nxt + 1, t0));
         const m = addMeals(ctx, t0, v.depart);
         const c = c0 + (m.d - t0) + v.penalty + m.pen;
         const ni = (mask | (1 << nxt)) * n + nxt;
@@ -153,7 +153,7 @@ function solveDP(ctx) {
   let bestLast = -1;
   for (let last = 0; last < n; last++) {
     const i = (FULL - 1) * n + last;
-    const back = ctx.hasEnd ? ctx.travel(last + 1, n + 1) : 0;
+    const back = ctx.hasEnd ? ctx.travel(last + 1, n + 1, time[i]) : 0;
     const c = cost[i] + back + latePenalty(ctx, time[i] + back);
     if (c < best) {
       best = c;

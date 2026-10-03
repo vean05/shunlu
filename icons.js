@@ -53,6 +53,7 @@ const P = {
   sunset: '<path d="M12 10V2M8.5 5.5 12 2l3.5 3.5M4.2 10.2l1.4 1.4M1 18h2M21 18h2M18.4 11.6l1.4-1.4M23 22H1M16 18a4 4 0 0 0-8 0"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   map: '<path d="m9 4-6 2.5v14L9 18l6 2.5 6-2.5v-14L15 6.5Z"/><path d="M9 4v14M15 6.5v14"/>',
+  fuel: '<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 21h12M4 10h10"/><path d="M14 8h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V8.5L18 5.5"/>',
   pinned: '<path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3Z"/>',
   phoneApp:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>',
 };

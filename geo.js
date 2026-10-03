@@ -11,12 +11,21 @@ const VALHALLA = 'https://valhalla1.openstreetmap.de';
 // Nominatim 要求每秒最多 1 次请求
 let lastNominatim = 0;
 async function nominatimFetch(url) {
-  const wait = lastNominatim + 1100 - Date.now();
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastNominatim = Date.now();
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`搜索服务出错（${res.status}）`);
-  return res.json();
+  // 网络不稳或服务很忙：等一下再试（最多 3 次）
+  for (let attempt = 0; ; attempt++) {
+    const wait = lastNominatim + 1100 - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastNominatim = Date.now();
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw Object.assign(new Error(`搜索服务出错（${res.status}）`), { status: res.status });
+      return await res.json();
+    } catch (e) {
+      const retry = !e.status || e.status === 429 || e.status >= 500;
+      if (!retry || attempt >= 2 || !navigator.onLine) throw e;
+      await new Promise((r) => setTimeout(r, e.status === 429 ? 4000 : 1500 * (attempt + 1)));
+    }
+  }
 }
 
 // 输入里有中日韩文字吗
@@ -225,8 +234,9 @@ function fetchJSON(url) {
       try {
         return await fetchJSONOnce(url);
       } catch (e) {
-        if (attempt >= 1) throw e;
-        await new Promise((r) => setTimeout(r, e.status === 429 ? 3000 : 1000));
+        // 没网络就不用等；服务很忙（429）等久一点
+        if (attempt >= 2 || !navigator.onLine || (e.status && e.status < 500 && e.status !== 429)) throw e;
+        await new Promise((r) => setTimeout(r, e.status === 429 ? 4000 : 1500 * (attempt + 1)));
       }
     }
   });
@@ -341,8 +351,22 @@ export async function travelTable(profile, points, firstIsLive = false) {
   }
 
   if (missingFixed) {
-    // 有新地点：整张表问一次
-    const data = await rawTable(profile, points, false);
+    // 有新地点：整张表问一次。没网络 / 服务挂了：存过的照用，没存过的用直线估计
+    let data;
+    try {
+      data = await rawTable(profile, points, false);
+    } catch (e) {
+      const est = estimateTable(profile, points);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          if (durations[i][j] == null) {
+            durations[i][j] = est.durations[i][j];
+            distances[i][j] = est.distances[i][j];
+          }
+        }
+      }
+      return { durations, distances, estimated: true, error: e };
+    }
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
         durations[i][j] = data.durations[i][j];
@@ -354,8 +378,19 @@ export async function travelTable(profile, points, firstIsLive = false) {
     }
     savePairs();
   } else if (firstIsLive && n > 1) {
-    // 地点都算过了：只问"现在的位置 → 每个地点"，一次很小的请求
-    const data = await rawTable(profile, points, true);
+    // 地点都算过了：只问"现在的位置 → 每个地点"，一次很小的请求（没网络就用直线估计）
+    let data;
+    try {
+      data = await rawTable(profile, points, true);
+    } catch (e) {
+      const est = estimateTable(profile, points);
+      data = { durations: [est.durations[0]], distances: [est.distances[0]] };
+      for (let j = 0; j < n; j++) {
+        durations[0][j] = data.durations[0][j];
+        distances[0][j] = data.distances[0][j];
+      }
+      return { durations, distances, estimated: true, error: e };
+    }
     for (let j = 0; j < n; j++) {
       durations[0][j] = data.durations[0][j];
       distances[0][j] = data.distances[0][j];

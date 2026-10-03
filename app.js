@@ -1,9 +1,9 @@
-import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=21';
-import { optimize, evaluate } from './optimizer.js?v=21';
-import { arrangeDays } from './days.js?v=21';
-import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=21';
-import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=21';
-import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=21';
+import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=22';
+import { optimize, evaluate } from './optimizer.js?v=22';
+import { arrangeDays } from './days.js?v=22';
+import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=22';
+import { placeHoursOn, minToHHMM, parseOpeningHours, setHolidayCheck } from './hours.js?v=22';
+import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=22';
 
 /* ================= 状态与保存 ================= */
 
@@ -196,6 +196,15 @@ function showView(name) {
     setDaysMode('list');
     setTab(state.tripTab && state.tripTabFor === t?.id ? state.tripTab : defaultTab(t));
     renderMap();
+    if (t) {
+      ensureTz(t);
+      loadHolidays(t);
+      if (navigator.onLine && !prefetched.has(t.id)) {
+        prefetched.add(t.id);
+        setTimeout(() => T() === t && prefetchTripPairs(t), 8000);
+      }
+    }
+    clearFuel();
   }
 }
 
@@ -209,6 +218,7 @@ function renderTrips() {
   $('#onboard').hidden = !!trips.length;
   renderTemplates();
   updateInstallCard();
+  updateSafetyCards();
   list.innerHTML = trips
     .map((t) => {
       const left = t.places.filter((p) => !p.done).length;
@@ -483,9 +493,14 @@ $('#btnExport').addEventListener('click', async () => {
   if (navigator.canShare?.({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: '顺路备份' });
+      markBackup();
+      updateSafetyCards();
+      toast('备份好了：换手机时在首页按「导入备份」');
       return;
     } catch {}
   }
+  markBackup();
+  updateSafetyCards();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(file);
   a.download = file.name;
@@ -729,7 +744,7 @@ function createSearch(root, opts) {
       head.textContent = `搜索结果（${results.length}）· 点照片看大图`;
       draw();
     } catch (err) {
-      showMsg('', `搜索失败：${esc(err.message)}，请检查网络再试一次`);
+      showMsg('', `${esc(friendlyErr(err))}…再按一次「搜索」试试`);
     }
   });
 
@@ -1295,7 +1310,7 @@ async function renderStaySuggest(force = false) {
     try {
       await computeStaySuggestions();
     } catch (e) {
-      box.innerHTML = `<div class="sugg-card muted">暂时算不出建议（${esc(e.message)}）</div>`;
+      box.innerHTML = `<div class="sugg-card muted">暂时算不出建议（${esc(friendlyErr(e))}）</div>`;
       return;
     } finally {
       suggLoading = false;
@@ -1582,6 +1597,11 @@ function chooseDest(c) {
   const t = T();
   const changed = !t.dest || t.dest.name !== c.name;
   t.dest = { name: c.name, sub: c.sub, lat: c.lat, lon: c.lon, bbox: c.bbox };
+  if (changed) {
+    delete t.tz;
+    delete t.country;
+    ensureTz(t);
+  }
   if (changed && !setupEdit && t.name.startsWith('行程 ')) t.name = `${c.name} ${fmtDate(Date.now())}`;
   // 同一个城市之前住过的地方，直接沿用（同一趟旅行通常住同一间）
   if (changed && !t.home) {
@@ -1623,7 +1643,7 @@ $('#cityForm').addEventListener('submit', async (e) => {
           .join('')
       : '<div class="smsg">找不到这个城市，试试英文名字</div>';
   } catch (err) {
-    $('#cityResults').innerHTML = `<div class="smsg">搜索失败：${esc(err.message)}</div>`;
+    $('#cityResults').innerHTML = `<div class="smsg">${esc(friendlyErr(err))}，再按一次「搜索」试试</div>`;
   }
 });
 $('#cityResults').addEventListener('click', (e) => {
@@ -1649,7 +1669,7 @@ function loadPopular(dest) {
     })
     .catch((e) => {
       console.warn(e);
-      if (popular.key === key) popular.error = e.message || '载入失败';
+      if (popular.key === key) popular.error = friendlyErr(e);
     })
     .finally(() => {
       if (popular.key === key) popular.loading = null;
@@ -1744,7 +1764,7 @@ function renderSetupPlaces() {
   $('#setupPlaces').innerHTML = active.length
     ? active
         .map((p, i) => {
-          const h = placeHoursOn(p, new Date());
+          const h = placeHoursOn(p, new Date(NOW()));
           const hours = h.known ? (h.windows.length ? `今天 ${h.windows.map(([o, c]) => `${minToHHMM(o)}–${minToHHMM(c)}`).join('，')}` : '今天休息') : '营业时间未知';
           return `<div class="pitem" data-id="${p.id}">
             <div class="si-thumb" data-prev="${i}">${kindIcon(p.kind)}</div>
@@ -1968,7 +1988,10 @@ function setupDone(back = false) {
     t.curDay = 0;
     // 有还没分到哪天的地点、或是第一次，就自动分配
     const need = t.arrangeSig !== arrangeSig(t) || t.places.some((p) => isLive(p) && !(p.day >= 1 && p.day <= t.days));
-    (need ? arrangeTrip(t) : Promise.resolve()).then(() => replan()).catch((e) => setStatus(`分配失败：${e.message}`, true));
+    (need ? arrangeTrip(t) : Promise.resolve()).then(() => replan()).catch((e) => {
+      setStatus(friendlyErr(e), true);
+      retryLater();
+    });
   } else replan();
 }
 
@@ -2239,7 +2262,7 @@ const DAY_COLORS = ['#2563eb', '#f97316', '#16a34a', '#9333ea', '#db2777', '#089
 const dayColor = (d) => DAY_COLORS[(d - 1) % DAY_COLORS.length];
 const isMulti = (t) => (t?.days || 1) > 1;
 function todayStr() {
-  const d = new Date();
+  const d = new Date(NOW());
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 function dayDate(t, d) {
@@ -2253,7 +2276,7 @@ function fmtDay(t, d) {
 // 哪一天是今天（行程进行中），不是就返回 null
 function todayDay(t) {
   if (!isMulti(t)) return null;
-  const today = startOfDay(Date.now());
+  const today = startOfDay(NOW());
   for (let d = 1; d <= t.days; d++) if (dayDate(t, d).getTime() === today) return d;
   return null;
 }
@@ -2275,14 +2298,14 @@ function setManual(t, day, order) {
 // 行程进行中：最后一个打勾的地方（18 小时内；多天行程只看那一天的）
 function lastDonePlace(t, day = null) {
   return t.places
-    .filter((p) => p.done && p.doneAt && Date.now() - p.doneAt < 18 * 3600e3 && (day == null || p.day === day))
+    .filter((p) => p.done && p.doneAt && NOW() - p.doneAt < 18 * 3600e3 && (day == null || p.day === day))
     .sort((a, b) => b.doneAt - a.doneAt)[0] || null;
 }
 
 // 这一天（或单日行程）几点开始算
 function departTime(t, day = null) {
   const s = t.settings;
-  const now = Date.now();
+  const now = NOW();
   const live = day == null || day === todayDay(t);
   // 已经去过地方：接着那个地方的离开时间（提前规划时）或现在（真的在路上时）
   const last = live ? lastDonePlace(t, day) : null;
@@ -2295,7 +2318,7 @@ function departTime(t, day = null) {
   }
   if (!over && (s.departMode !== 'at' || !s.departAt)) return now;
   const [h, m] = (over || s.departAt).split(':').map(Number);
-  const d = new Date();
+  const d = new Date(NOW());
   d.setHours(h, m, 0, 0);
   if (d.getTime() < now - 5 * 60e3) d.setDate(d.getDate() + 1);
   return d.getTime();
@@ -2337,6 +2360,7 @@ async function buildTravel(t, pts, firstIsLive) {
       if (pts.length < 2) return (tables[pr] = estimateTable(pr, pts));
       try {
         tables[pr] = await travelTable(pr, pts, firstIsLive);
+        if (tables[pr].estimated) estimated = true;
       } catch (e) {
         console.warn(e);
         estimated = true;
@@ -2518,7 +2542,8 @@ async function replan() {
     else await doReplan(t, isMulti(t) ? t.curDay : null);
   } catch (e) {
     console.error(e);
-    setStatus(`计算失败：${e.message}`, true);
+    setStatus(friendlyErr(e), true);
+    retryLater();
   } finally {
     planning = false;
     $('#btnReplan').disabled = false;
@@ -2582,7 +2607,7 @@ async function buildDayBundle(trip, day, { quiet = false } = {}) {
   const stay = [0, ...remaining.map((p) => (Number(p.stayMin) || 0) * 60e3)];
   const windows = [null, ...remaining.map((p) => windowsFor(p, startTime))];
   const fixed = [null, ...remaining.map((p) => fixedAt(p, startTime))];
-  const ctx = { n, travel: (a, b) => legOf(a, b)?.dur ?? 0, startTime, stay, windows, fixed, hasEnd: !!end };
+  const ctx = { n, travel: (a, b, ms) => legDurAt(trip, legOf(a, b), ms), startTime, stay, windows, fixed, hasEnd: !!end };
   const best = optimize(ctx);
   const baseline = evaluate(ctx, remaining.map((_, i) => i + 1));
   return { trip, day, ctx, legOf, leg, walk, ov, idx, pts, remaining, end, n, origin, startTime, estimated, closedIds, best, baseline };
@@ -2602,7 +2627,7 @@ async function refineTransit(b, order) {
     const depart = i === 1 ? b.startTime : res.stops[i - 2].depart;
     let plan = null;
     try {
-      plan = await transitPlan(b.pts[a], b.pts[c], depart);
+      plan = await transitPlan(b.pts[a], b.pts[c], depart - tzShift(b.trip));
     } catch (e) {
       console.warn(e);
     }
@@ -2660,10 +2685,11 @@ function planFromOrder(b, order, manual) {
   const seq = [0, ...order, ...(end ? [n + 1] : [])];
   const legs = [];
   for (let i = 1; i < seq.length; i++) {
-    const l = legOf(seq[i - 1], seq[i]);
+    // 这一段几点出发（尖峰时间开车要多留时间）
+    const l = legAt(b.trip, legOf(seq[i - 1], seq[i]), i === 1 ? startTime : res.stops[i - 2]?.depart);
     const pt = (k) => ({ name: b.pts[k].name || '', lat: b.pts[k].lat, lon: b.pts[k].lon });
     const parts = l?.parts ? l.parts.map((x) => ({ mode: x.mode, dur: x.dur, dist: x.dist, from: pt(x.from), to: pt(x.to) })) : null;
-    legs.push(l ? { mode: l.mode, dur: l.dur, dist: l.dist, parts, transit: l.transit || null, noTransit: !!l.noTransit, est: !!l.est } : null);
+    legs.push(l ? { mode: l.mode, dur: l.dur, dist: l.dist, parts, transit: l.transit || null, noTransit: !!l.noTransit, est: !!l.est, traffic: l.traffic || null } : null);
   }
   const stops = res.stops.map((st) => ({
     id: remaining[st.k - 1].id,
@@ -2709,7 +2735,9 @@ function applyOrder(b, order, manual) {
   save();
   if (T() === trip) {
     renderMap();
-    setStatus(`更新于 ${fmtClock(Date.now())}${estimated ? ' · 网络不好，时间是粗略估计' : ''}`, estimated);
+    setStatus(`更新于 ${fmtClock(Date.now())}${estimated ? (navigator.onLine ? ' · 网络不稳，时间是粗略估计' : ' · 离线中，用存好的路程资料') : ''}`, estimated);
+    if (!estimated) retryN = 0;
+    else retryLater();
     setTimeout(mealCheck, 1500);
   }
   fetchLines(trip, plan, ptsOrder, legs, estimated);
@@ -2773,10 +2801,10 @@ async function arrangeTrip(trip) {
     const at = (node) => (node === 0 ? start : node === ks.length + 1 ? end : base + ks[node - 1]);
     const ctx = {
       n: ks.length,
-      travel: (a, b) => {
+      travel: (a, b, ms) => {
         const i = at(a);
         const j = at(b);
-        return i < 0 || j < 0 ? 0 : leg(i, j).dur;
+        return i < 0 || j < 0 ? 0 : legDurAt(trip, leg(i, j), ms);
       },
       startTime,
       stay: [0, ...ks.map((k) => (Number(places[k].stayMin) || 0) * 60e3)],
@@ -3006,20 +3034,20 @@ function stopInfoMap() {
 
 function hoursLine(p) {
   const plan = T().plan;
-  const when = plan ? plan.startTime : Date.now();
+  const when = plan ? plan.startTime : NOW();
   const h = placeHoursOn(p, new Date(when));
   if (!h.known) {
-    return p.hoursRaw
+    return (p.hoursRaw
       ? `<span class="muted">营业时间：${esc(p.hoursRaw)}（看不懂，点这里手动输入）</span>`
-      : `<span class="muted">营业时间未知 · 点这里输入</span>`;
+      : `<span class="muted">营业时间未知 · 出发前确认</span>`) + ` <span class="hours-check" data-act="checkhours">去 Google 地图看 ›</span>`;
   }
-  const isToday = startOfDay(when) === startOfDay(Date.now());
+  const isToday = startOfDay(when) === startOfDay(NOW());
   const dayLabel = isToday ? '今天' : '当天';
-  if (!h.windows.length) return `<span class="note bad">${dayLabel}休息</span>`;
+  if (!h.windows.length) return `<span class="note bad">${dayLabel}休息${h.holiday ? '（公共假期）' : ''}</span>`;
   const txt = h.windows.map(([o, c]) => `${minToHHMM(o)}–${minToHHMM(c)}`).join('，');
   let extra = '';
   if (isToday) {
-    const nowMin = (Date.now() - startOfDay(Date.now())) / 60e3;
+    const nowMin = (NOW() - startOfDay(NOW())) / 60e3;
     const cur = h.windows.find(([o, c]) => nowMin >= o && nowMin < c);
     const next = h.windows.find(([o]) => o > nowMin);
     if (cur) extra = ` · <span class="note ok">营业中，${fmtDur((cur[1] - nowMin) * 60e3)}后关门</span>`;
@@ -3085,7 +3113,7 @@ function legHtml(l) {
     return `<div class="leg car combo"><div class="tl-time"></div><div class="tl-rail"><i></i></div><div class="leg-tr leg-chain">${l.parts.map(pill).join('')}</div></div>`;
   }
   const k = l.mode === 'car' ? 'car' : 'foot';
-  return `<div class="leg ${l.mode}"><div class="tl-time"></div><div class="tl-rail"><i></i></div><span class="leg-pill m-${k}">${modeIcon(k, 15)} ${MODE_NAME[k]} ${fmtDur(l.dur)} · ${fmtDist(l.dist)}</span></div>`;
+  return `<div class="leg ${l.mode}"><div class="tl-time"></div><div class="tl-rail"><i></i></div><span class="leg-pill m-${k}">${modeIcon(k, 15)} ${MODE_NAME[k]} ${fmtDur(l.dur)} · ${fmtDist(l.dist)}</span>${l.traffic ? '<span class="traffic-tag">含塞车</span>' : ''}</div>`;
 }
 
 function renderMap() {
@@ -3139,7 +3167,11 @@ function renderMap() {
   const info = stopInfoMap();
   let html = '';
   if (plan && plan.stops.length) {
+    html += bookingHtml(t);
+    html += overflowHtml(t, plan);
+    html += holidayNote(t, plan.startTime);
     html += dayBarHtml(t, plan);
+    if (dayStats(plan).car > 120e3) html += `<div class="fuel-tip">${ic('fuel', 14)} 今天开车 ${fmtDist(dayStats(plan).car)}：在地图按 ${ic('fuel', 13)} 看路上的油站</div>`;
     const rain = rainAdvice(t, isMulti(t) ? t.curDay : null, active);
     if (rain) html += `<div class="rain-note">${ic('rain', 16)} ${rain}</div>`;
     const navName = NAV_APPS[state.navApp || 'google'];
@@ -3175,7 +3207,7 @@ function renderMap() {
           <div class="si-thumb sm" data-prev="${planned.indexOf(id)}">${kindIcon(p.kind)}</div>
           <div class="body">
             <div class="name">${esc(p.name)}</div>
-            <div class="chips-row">${p.fixedTime ? `<span class="chip fix-chip" data-act="time">${ic('pinned', 12)} ${p.checkin ? `${esc(p.fixedTime)} 起入住` : `固定 ${esc(p.fixedTime)}`}</span>` : ''}${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}${sunChip(p, st, sun)}</div>
+            <div class="chips-row">${p.fixedTime ? `<span class="chip fix-chip" data-act="time">${ic('pinned', 12)} ${p.checkin ? `${esc(p.fixedTime)} 起入住` : `固定 ${esc(p.fixedTime)}`}</span>` : ''}${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}${sunChip(p, st, sun)}${bookingChip(p)}</div>
             <div class="hours">${hoursLine(p)}</div>
           </div>
         </div>
@@ -3256,6 +3288,12 @@ $('#list').addEventListener('click', (e) => {
   else if (act === 'undo') markDone(p.id, false);
   else if (act === 'moveday') movePlaceToDay(p, Number(actEl.dataset.day));
   else if (act === 'time') openTimeDialog(p);
+  else if (act === 'booked') {
+    p.booking = 'done';
+    save();
+    renderMap();
+    toast(`「${shortName(p)}」已买好票`);
+  } else if (act === 'checkhours') window.open(checkHoursLink(p), '_blank');
   else if (act === 'del') removePlace(p.id);
 });
 
@@ -3283,8 +3321,8 @@ function markDone(id, done) {
   if (done) {
     // 记下什么时候、预计几点离开：下一段从这里接着算
     const st = t.plan?.stops.find((x) => x.id === id) || t.dayPlans?.[p.day]?.stops.find((x) => x.id === id);
-    p.doneAt = Date.now();
-    p.doneDepart = st ? st.depart : Date.now();
+    p.doneAt = NOW();
+    p.doneDepart = st ? st.depart : NOW();
   } else {
     delete p.doneAt;
     delete p.doneDepart;
@@ -3579,7 +3617,7 @@ function renderDayTabs(t) {
   $('#btnReorder').hidden = overview;
   $('#btnPreview').hidden = overview;
   $('#btnArrange').hidden = !multi;
-  $('#tripSub').textContent = !multi ? (t.dest?.name || '') : overview ? `${t.days} 天 · ${fmtDay(t, 1)} 起` : `第 ${t.curDay} 天 · ${fmtDay(t, t.curDay)}`;
+  $('#tripSub').textContent = (!multi ? (t.dest?.name || '') : overview ? `${t.days} 天 · ${fmtDay(t, 1)} 起` : `第 ${t.curDay} 天 · ${fmtDay(t, t.curDay)}`) + (tzShift(t) ? ' · 当地时间' : '');
   if (!multi) return;
   const today = todayDay(t);
   $('#dayTabs').innerHTML =
@@ -3667,6 +3705,8 @@ function renderOverview(t) {
         return a ? `<div class="dc-warn">${ic('rain', 14)} ${a}</div>` : '';
       })()}
       ${late ? `<div class="dc-warn">${ic('clock', 14)} 这天太满，预计 ${fmtClock(end)} 才回到住的地方，可以把一些地点换到别天</div>` : ''}
+      ${holidayOn(t, dayDate(t, d)) ? `<div class="dc-warn ph">${ic('calendar', 14)} 公共假期（${esc(holidayOn(t, dayDate(t, d)).name)}）：有些地方休息、人比较多</div>` : ''}
+      ${ps.some((p) => p.booking === 'need' && !p.done) ? `<div class="dc-warn">${ic('ticket', 14)} 要预约 / 买票：${ps.filter((p) => p.booking === 'need' && !p.done).map((p) => esc(shortName(p))).join('、')}</div>` : ''}
       ${doneHere.length && left.length ? `<div class="dc-done">${ic('check', 13)} 已去过 ${doneHere.length} 个</div>` : ''}
     </div>`;
   }
@@ -3721,7 +3761,7 @@ const hmToMin = (hm) => {
   const [h, m] = hm.split(':').map(Number);
   return h * 60 + m;
 };
-const nowMin = () => (Date.now() - startOfDay(Date.now())) / 60e3;
+const nowMin = () => (NOW() - startOfDay(NOW())) / 60e3;
 // 这个地方是不是吃饭的地方（餐厅、小贩中心、夜市、咖啡店…）
 const FOOD_KIND = /restaurant|food|cafe|hawker|marketplace|fast_food|bakery|ice_cream|pub|bar\b/;
 const FOOD_NAME = /小贩|美食|夜市|餐|饭|食|面|咖啡|茶室|hawker|food|kopitiam|café|cafe|restaurant|night market|pasar malam/i;
@@ -3751,7 +3791,7 @@ function mealCheck() {
   if ($('#mealDialog').open || document.querySelector('dialog[open]')) return;
   // 只在「今天」的行程：多天看今天那一页；单日看计划是不是今天
   const day = isMulti(t) ? t.curDay : null;
-  if (isMulti(t) ? !day || day !== todayDay(t) : !t.plan || startOfDay(t.plan.startTime) !== startOfDay(Date.now())) return;
+  if (isMulti(t) ? !day || day !== todayDay(t) : !t.plan || startOfDay(t.plan.startTime) !== startOfDay(NOW())) return;
   if (!t.places.some((p) => !p.done && (day == null || p.day === day))) return;
   const m = MEALS.find((x) => nowMin() >= hmToMin(x.from) && nowMin() <= hmToMin(x.to));
   if (!m) return;
@@ -3759,8 +3799,8 @@ function mealCheck() {
   const st = mealState()[key];
   if (st === 'no' || st === 'done' || (typeof st === 'number' && Date.now() < st)) return;
   // 那天吃饭时间前后已经安排了吃的地方（或刚去过）→ 不用问
-  const lo = startOfDay(Date.now()) + (hmToMin(m.from) - 75) * 60e3;
-  const hi = startOfDay(Date.now()) + (hmToMin(m.to) + 75) * 60e3;
+  const lo = startOfDay(NOW()) + (hmToMin(m.from) - 75) * 60e3;
+  const hi = startOfDay(NOW()) + (hmToMin(m.to) + 75) * 60e3;
   const planned = (t.plan?.stops || []).some((s) => {
     const p = t.places.find((x) => x.id === s.id);
     return p && isFood(p) && s.start >= lo && s.start <= hi;
@@ -3891,7 +3931,7 @@ function navSegments() {
   const stops = plan.stops.map((s) => t.places.find((p) => p.id === s.id)).filter((p) => p && !p.done);
   // 今天在路上：从「我现在的位置」开始（不填起点，Google Maps 会用目前位置）
   const day = isMulti(t) ? t.curDay : null;
-  const live = startOfDay(plan.startTime) === startOfDay(Date.now()) && (day == null || day === todayDay(t));
+  const live = startOfDay(plan.startTime) === startOfDay(NOW()) && (day == null || day === todayDay(t));
   const pts = [...(live || !plan.origin ? [null] : [plan.origin]), ...stops, ...(plan.end ? [plan.end] : [])];
   const walking = plan.legs.every((l) => !l || l.mode === 'foot');
   const transit = plan.legs.some((l) => l?.mode === 'transit');
@@ -4004,7 +4044,7 @@ function weatherOn(t, day) {
   if (!p) return null;
   const c = wxCache[`${p.lat.toFixed(2)},${p.lon.toFixed(2)}`];
   if (!c) return null;
-  const x = day ? dayDate(t, day) : new Date(t.plan?.startTime || Date.now());
+  const x = day ? dayDate(t, day) : new Date(t.plan?.startTime || NOW());
   const date = `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
   return c.days[date] || null;
 }
@@ -4073,7 +4113,11 @@ function sunForPlan(t, plan) {
   if (!pt) return null;
   const noon = new Date(plan.startTime);
   noon.setHours(12, 0, 0, 0);
-  return sunTimes(noon.getTime(), pt.lat, pt.lon);
+  const sun = sunTimes(noon.getTime() - tzShift(t), pt.lat, pt.lon);
+  if (!sun) return null;
+  // 日出日落是真正的时间：换成当地钟
+  const sh = tzShift(t);
+  return { rise: sun.rise + sh, set: sun.set + sh, gold: sun.gold + sh };
 }
 function sunMini(t, plan) {
   const sun = sunForPlan(t, plan);
@@ -4228,7 +4272,7 @@ const visitState = { at: null, since: 0, asked: new Set() };
 // 现在是不是「行程进行中」：看今天那一天（或单日行程是今天）
 function isLiveNow(t) {
   if (!t?.plan?.stops.length || currentView !== 'map' || document.visibilityState !== 'visible') return false;
-  if (startOfDay(t.plan.startTime) !== startOfDay(Date.now())) return false;
+  if (startOfDay(t.plan.startTime) !== startOfDay(NOW())) return false;
   return !isMulti(t) || (t.curDay && t.curDay === todayDay(t));
 }
 
@@ -4584,6 +4628,8 @@ function openOffline() {
 }
 
 async function downloadOffline() {
+  const t0 = T();
+  prefetchTripPairs(t0, false).then((ok) => ok && toast('路程资料也存好了：没网络也能重新计算'));
   const t = T();
   const a = offlineArea(t);
   if (!a || offBusy) return;
@@ -4631,7 +4677,7 @@ async function downloadOffline() {
     localStorage.setItem(OFF_KEY, JSON.stringify(st));
     $('#ofStatus').textContent = fail ? `完成：${ok} 个文件，${fail} 个失败（可以再按一次补下载）` : `完成！${ok} 个地图文件已经存在手机里，没网络也能看。`;
   } catch (e) {
-    $('#ofStatus').textContent = `下载失败：${e.message}，请检查网络`;
+    $('#ofStatus').textContent = `${friendlyErr(e)}，等一下再按一次「下载」`;
   } finally {
     offBusy = false;
     $('#ofGo').disabled = false;
@@ -4883,6 +4929,7 @@ function startFollow() {
   if (!navigator.geolocation) return toast('这个浏览器不支持定位');
   follow = { center: true, last: null, speed: null, eta: '', etaAt: 0, said: new Set() };
   keepAwake(true);
+  batteryWarn();
   updateVoiceBtn();
   // 第一次朗读要在按按钮的当下（iPhone 的规定），之后才能自动讲
   const t = T();
@@ -4919,6 +4966,7 @@ function onFollow(pos) {
   follow.last = me;
   lastGps = me;
   showMe(me);
+  followPower(me, kmh);
   if (follow.center && map) map.easeTo({ center: [me.lon, me.lat], zoom: Math.max(map.getZoom(), 15), duration: 600 });
   // 到下一站还要多久：每 45 秒问一次真实路程
   const t = T();
@@ -5556,8 +5604,8 @@ function buildICS(t) {
         'BEGIN:VEVENT',
         `UID:${t.id}-${p.id}@shunlu`,
         `DTSTAMP:${now}`,
-        `DTSTART:${icsTime(st.start)}`,
-        `DTEND:${icsTime(Math.max(st.depart, st.start + 5 * 60e3))}`,
+        `DTSTART:${icsTime(st.start - tzShift(t))}`,
+        `DTEND:${icsTime(Math.max(st.depart, st.start + 5 * 60e3) - tzShift(t))}`,
         `SUMMARY:${icsText(p.name)}`,
         `LOCATION:${icsText(p.address || p.name)}`,
         `GEO:${p.lat.toFixed(6)};${p.lon.toFixed(6)}`,
@@ -6043,6 +6091,7 @@ $('#btnBoard').addEventListener('click', openBoard);
 /* ================= 行程里的 4 个分页：地图 / 每天 / 地点 / 更多 ================= */
 
 let tab = 'map';
+const prefetched = new Set(); // 这次打开 App 已经帮哪些行程存好路程
 let daysMode = 'list'; // 「每天」分页：list = 列表，board = 调整安排
 let nextFocus = null; // 地图上点了哪个地点（下一站卡片改显示它）
 
@@ -6176,7 +6225,9 @@ function renderNextCard() {
         <div class="nc-acts"><button type="button" class="primary" data-nc="nav" data-id="${id}">${ic('nav', 15)} 导航</button><button type="button" data-nc="done" data-id="${id}">${ic('check', 15)} 去过了</button><button type="button" data-nc="days">全部 ${ids.length} 站 ›</button></div>`;
     }
   }
-  el.innerHTML = chips + `<div class="nc-body">${body}</div>`;
+  const of = t.plan && (!multi || t.curDay) ? overflowOf(t, t.plan) : null;
+  const alerts = bookingHtml(t) + (of ? `<div class="nc-alert" data-nc="days">${ic('alert', 14)} <span>${of.late ? `这天太满（约 ${fmtClock(of.end)} 才结束）` : '有地点到的时候已关门'} · 看建议 ›</span></div>` : '');
+  el.innerHTML = chips + alerts + `<div class="nc-body">${body}</div>`;
   if (thumb) hydrateThumbs(el, [thumb]);
   el.querySelector('.nc-days .on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   requestAnimationFrame(() => document.documentElement.style.setProperty('--next-h', `${el.offsetHeight}px`));
@@ -6222,6 +6273,7 @@ function renderPlaces() {
       st && st.flag !== 'closed' ? `${fmtClock(st.start)}–${fmtClock(st.depart)}` : st ? '到的时候已关门' : null,
       `停留 ${fmtDur((Number(p.stayMin) || 0) * 60e3)}`,
       p.fixedTime ? (p.checkin ? `${p.fixedTime} 起入住` : `固定 ${p.fixedTime}`) : null,
+      p.booking === 'need' ? '要预约，还没买' : p.booking === 'done' ? '已买票' : null,
     ].filter(Boolean).join(' · ');
     items.push(p);
     return `<div class="pl-row${p.done ? ' done' : ''}" data-id="${p.id}">
@@ -6294,6 +6346,7 @@ $('#plList').addEventListener('click', (e) => {
   }
 });
 $('#plAdd').addEventListener('click', () => $('#btnAdd').click());
+$('#btnBackup').addEventListener('click', () => $('#btnExport').click());
 $('#plBulk').addEventListener('click', () => openBulk(() => {
   renderMap();
   scheduleReplan(100);
@@ -6304,6 +6357,7 @@ $('#plBulk').addEventListener('click', () => openBulk(() => {
 function renderMore() {
   const t = T();
   if (!t) return;
+  renderSettings();
   const multi = isMulti(t);
   $('#btnArrange').hidden = !multi;
   $('#btnBoard').hidden = !multi;
@@ -6383,6 +6437,554 @@ window.addEventListener('popstate', () => {
   if (currentView !== 'trips' || dlgStack.length) armBack();
 });
 
+/* ================= 当地时区：在马来西亚排东京的行程，时间也要按东京算 ================= */
+//
+// 做法：整个行程用「当地的钟」来算（营业时间、几点出发都是当地时间）。
+// NOW() = 现在的「当地钟」；只有跟外面真的时间打交道时（公交班次、日历）才换回真正的时间。
+
+function tzOffsetMin(tz, ms) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      .formatToParts(ms)
+      .map((x) => [x.type, x.value]),
+  );
+  return Math.round((Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour % 24, parts.minute, parts.second) - ms) / 60e3);
+}
+// 当地钟比手机钟快多少（毫秒）；同一个时区 = 0
+function tzShift(t = T()) {
+  if (!t?.tz) return 0;
+  try {
+    return (tzOffsetMin(t.tz, Date.now()) + new Date().getTimezoneOffset()) * 60e3;
+  } catch {
+    return 0;
+  }
+}
+const NOW = () => Date.now() + tzShift();
+function tzLabel(t = T()) {
+  const sh = tzShift(t);
+  if (!sh) return '';
+  const h = Math.abs(sh) / 3600e3;
+  const city = (t.tz || '').split('/').pop().replace(/_/g, ' ');
+  return `按当地时间（${city}），比你的手机${sh > 0 ? '快' : '慢'} ${Number.isInteger(h) ? h : h.toFixed(1)} 小时`;
+}
+
+// 查目的地的时区和国家（免费，不用申请）；查到时区跟手机不一样就重新算
+const tzLoading = new Set();
+async function ensureTz(t) {
+  const p = t?.dest || t?.home || t?.places.find(isLive);
+  if (!p || tzLoading.has(t.id) || (t.tz !== undefined && t.country !== undefined)) return;
+  tzLoading.add(t.id);
+  try {
+    if (t.tz === undefined) {
+      const params = new URLSearchParams({ latitude: p.lat.toFixed(3), longitude: p.lon.toFixed(3), timezone: 'auto', forecast_days: '1', daily: 'sunrise' });
+      const data = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`).then((r) => r.json());
+      if (data.timezone) {
+        t.tz = data.timezone;
+        save();
+        if (tzShift(t) && T() === t && currentView === 'map') {
+          toast(tzLabel(t), 4000);
+          t.dayPlans = {};
+          t.plan = null;
+          replan();
+        }
+      }
+    }
+    if (t.country === undefined) {
+      const r = await fetch(`https://photon.komoot.io/reverse?lat=${p.lat.toFixed(4)}&lon=${p.lon.toFixed(4)}&limit=1`).then((x) => x.json());
+      t.country = (r.features?.[0]?.properties?.countrycode || '').toUpperCase() || null;
+      save();
+      if (t.country) loadHolidays(t);
+    }
+  } catch (e) {
+    console.warn(e);
+  } finally {
+    tzLoading.delete(t.id);
+  }
+}
+
+/* ================= 公共假期（免费资料 date.nager.at）：有些地方休息、人比较多 ================= */
+
+const PH_KEY = 'shunlu:ph:v1';
+let phCache = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(PH_KEY)) || {};
+  } catch {
+    return {};
+  }
+})();
+const phLoading = {};
+function loadHolidays(t) {
+  if (!t?.country) return;
+  const years = new Set([dayDate(t, 1).getFullYear(), dayDate(t, t.days || 1).getFullYear()]);
+  for (const y of years) {
+    const key = `${t.country}-${y}`;
+    if (phCache[key] || phLoading[key]) continue;
+    phLoading[key] = fetch(`https://date.nager.at/api/v3/PublicHolidays/${y}/${t.country}`)
+      // 有些国家（例如马来西亚、泰国）这个免费资料没有：回传空的，就不显示假期提醒
+      .then((r) => (r.status === 200 ? r.json() : []))
+      .then((list) => {
+        // 只用全国的假期（州 / 地区的假期资料不一定准）
+        phCache[key] = list.filter((x) => x.global !== false).map((x) => ({ date: x.date, name: x.localName || x.name, en: x.name }));
+        try {
+          localStorage.setItem(PH_KEY, JSON.stringify(phCache));
+        } catch {}
+        if (currentView === 'map' && T() === t) renderMap();
+      })
+      .catch(() => {})
+      .finally(() => delete phLoading[key]);
+  }
+}
+// 某天是不是公共假期（是的话回传名字）
+function holidayOn(t, date) {
+  if (!t?.country) return null;
+  const d = new Date(date);
+  const ymdStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return (phCache[`${t.country}-${d.getFullYear()}`] || []).find((x) => x.date === ymdStr) || null;
+}
+// 营业时间的「PH」规则要知道哪天是假期
+setHolidayCheck((date) => !!holidayOn(T(), date));
+
+function holidayNote(t, date) {
+  const h = holidayOn(t, date);
+  return h ? `<div class="ph-note">${ic('calendar', 14)} <span><b>${esc(fmtDate(new Date(date).getTime()))}是公共假期（${esc(h.name)}）</b>：有些地方会休息或人比较多，出发前确认一下</span></div>` : '';
+}
+// 营业时间不知道的地方：直接去 Google 地图看
+function checkHoursLink(p) {
+  const q = `${p.en || p.name} ${T()?.dest?.name || ''}`.trim();
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+}
+
+/* ================= 塞车：尖峰时间开车多留时间（免费路线服务没有路况） ================= */
+
+const TRAFFIC = {
+  off: { label: '不加', sub: '照路线服务算的时间' },
+  rush: { label: '尖峰时间多 30%', sub: '平日 7:00–9:30、17:00–19:30 开车多留时间' },
+  all: { label: '全天多 20%', sub: '大城市、常塞车的地方' },
+};
+const trafficMode = (t) => t?.settings?.traffic || 'rush';
+function trafficFactor(t, ms) {
+  const m = trafficMode(t);
+  if (m === 'all') return 1.2;
+  if (m !== 'rush' || ms == null) return 1;
+  const d = new Date(ms);
+  if (d.getDay() === 0 || d.getDay() === 6) return 1;
+  const min = d.getHours() * 60 + d.getMinutes();
+  return (min >= 420 && min < 570) || (min >= 1020 && min < 1170) ? 1.3 : 1;
+}
+// 一段路在某个时间出发要多久（只有开车的部分会多留）
+function legDurAt(t, l, ms) {
+  if (!l) return 0;
+  const f = trafficFactor(t, ms);
+  if (f === 1) return l.dur;
+  if (l.parts) return l.parts.reduce((a, x) => a + (x.mode === 'car' ? x.dur * f : x.dur), 0);
+  return l.mode === 'car' ? l.dur * f : l.dur;
+}
+function legAt(t, l, ms) {
+  if (!l) return l;
+  const f = trafficFactor(t, ms);
+  if (f === 1) return l;
+  const out = { ...l, dur: legDurAt(t, l, ms), traffic: f };
+  if (l.parts) out.parts = l.parts.map((x) => (x.mode === 'car' ? { ...x, dur: x.dur * f } : x));
+  return out;
+}
+
+/* ================= 这天太满：主动建议换到别天 / 先不去 ================= */
+
+function overflowOf(t, plan) {
+  if (!plan?.stops?.length) return null;
+  const day = isMulti(t) ? t.curDay : null;
+  const end = plan.endArrive ?? plan.finish;
+  const lim = new Date(plan.startTime);
+  const [h, m] = (t.settings.dayEnd || '21:00').split(':').map(Number);
+  lim.setHours(h, m, 0, 0);
+  const limit = lim.getTime();
+  const late = end > limit + 10 * 60e3;
+  const ids = plan.stops.filter((st) => st.flag === 'closed').map((st) => st.id);
+  if (late) {
+    // 从最后面拿掉，拿到时间够为止（固定时间、Check-in 的不拿）
+    let over = end - limit;
+    for (let i = plan.stops.length - 1; i >= 0 && over > 0; i--) {
+      const st = plan.stops[i];
+      const p = t.places.find((x) => x.id === st.id);
+      if (!p || ids.includes(st.id) || p.fixedTime || p.checkin) continue;
+      ids.push(st.id);
+      over -= st.depart - st.arrive + (plan.legs[i]?.dur || 0);
+    }
+  }
+  if (!ids.length) return null;
+  const sig = `${day}|${ids.slice().sort().join()}`;
+  if (t.fullDismiss?.[sig]) return null;
+  // 换去哪天：其他天里最早结束、而且那天有开的
+  let target = null;
+  if (isMulti(t)) {
+    let best = Infinity;
+    for (let d = 1; d <= t.days; d++) {
+      if (d === day) continue;
+      const dp = t.dayPlans?.[d];
+      const fin = dp?.stops?.length ? (dp.endArrive ?? dp.finish) - dp.startTime : 0;
+      const ok = ids.every((id) => {
+        const h2 = placeHoursOn(t.places.find((x) => x.id === id), dayDate(t, d));
+        return !h2.known || h2.windows.length;
+      });
+      if (ok && fin < best) {
+        best = fin;
+        target = d;
+      }
+    }
+  }
+  return { late, end, limit, ids, target, sig };
+}
+
+function overflowHtml(t, plan) {
+  const o = overflowOf(t, plan);
+  if (!o) return '';
+  const names = o.ids.map((id) => shortName(t.places.find((x) => x.id === id))).join('、');
+  const why = o.late ? `这天太满：预计 ${fmtClock(o.end)} 才结束（你设 ${esc(t.settings.dayEnd || '21:00')} 前回到住处）` : '有地点到的时候已经关门';
+  return `<div class="overflow-card" data-ofsig="${esc(o.sig)}">
+    <div class="of-h">${ic('alert', 16)} <b>${why}</b></div>
+    <div class="of-sub">建议把「${esc(names)}」${o.target ? `换到第 ${o.target} 天（那天比较空）` : '先放进备选'}：</div>
+    <div class="of-btns">
+      ${o.target ? `<button type="button" class="primary" data-of="move" data-ofday="${o.target}">换到第 ${o.target} 天</button>` : ''}
+      <button type="button" data-of="park">${o.target ? '先不去' : '放进备选（先不去）'}</button>
+      <button type="button" data-of="no">不用</button>
+    </div>
+  </div>`;
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-of]');
+  if (!b) return;
+  const t = T();
+  const plan = t.plan;
+  const o = overflowOf(t, plan);
+  if (!o) return;
+  const act = b.dataset.of;
+  if (act === 'no') {
+    t.fullDismiss ||= {};
+    t.fullDismiss[o.sig] = 1;
+    save();
+    return renderMap();
+  }
+  const from = isMulti(t) ? t.curDay : null;
+  for (const id of o.ids) {
+    const p = t.places.find((x) => x.id === id);
+    if (!p) continue;
+    dropFromManual(t, id);
+    if (act === 'move') Object.assign(p, { day: Number(b.dataset.ofday), dayLocked: true, parked: false });
+    else Object.assign(p, { parked: true, day: null, dayLocked: false });
+  }
+  save();
+  toast(act === 'move' ? `${o.ids.length} 个地点换到第 ${b.dataset.ofday} 天，重新排路线` : `${o.ids.length} 个地点放进备选，重新排路线`, 3000);
+  if (act === 'move' && from) kbRecompute([from, Number(b.dataset.ofday)]).then(() => renderMap());
+  else replan();
+});
+
+/* ================= 要预约 / 买票的地点：出发前提醒 ================= */
+
+const BOOK = { need: '要预约 / 买票', done: '已预约 / 买好' };
+function bookingChip(p) {
+  if (p.booking === 'need') return `<span class="chip book-need" data-act="booked">${ic('ticket', 12)} 要预约，还没买 · 买好按这里</span>`;
+  if (p.booking === 'done') return `<span class="chip book-done">${ic('ticket', 12)} 已买好</span>`;
+  return '';
+}
+// 今天、明天要去，但还没预约 / 买票的
+function bookingDue(t) {
+  const today = startOfDay(NOW());
+  return t.places.filter((p) => {
+    if (p.booking !== 'need' || !isLive(p)) return false;
+    const d = isMulti(t) ? (p.day ? startOfDay(dayDate(t, p.day).getTime()) : null) : t.plan ? startOfDay(t.plan.startTime) : today;
+    return d != null && d - today >= 0 && d - today <= 864e5;
+  });
+}
+function bookingHtml(t) {
+  const due = bookingDue(t);
+  if (!due.length) return '';
+  const today = startOfDay(NOW());
+  const when = (p) => {
+    const d = isMulti(t) && p.day ? startOfDay(dayDate(t, p.day).getTime()) : today;
+    return d === today ? '今天' : '明天';
+  };
+  return `<div class="book-alert">${ic('ticket', 15)} <span>${due.map((p) => `${when(p)}的「${esc(shortName(p))}」`).join('、')}还没预约 / 买票</span></div>`;
+}
+
+/* ================= 网络不稳：自动重试、友善的说明、离线也能算 ================= */
+
+function friendlyErr(e) {
+  if (!navigator.onLine) return '没有网络，连上后会自动更新';
+  const msg = String(e?.message || e || '');
+  if (e?.status === 429 || /429|busy|Too Many/i.test(msg)) return '服务有点忙，正在重试';
+  if (e?.name === 'AbortError' || /timeout|abort/i.test(msg)) return '网络有点慢，正在重试';
+  return '网络不稳，正在重试';
+}
+let retryTimer = null;
+let retryN = 0;
+function retryLater() {
+  clearTimeout(retryTimer);
+  if (retryN >= 4) return;
+  const wait = [8, 20, 45, 90][retryN++] * 1000;
+  retryTimer = setTimeout(() => {
+    if (navigator.onLine && currentView === 'map') replan();
+  }, wait);
+}
+function updateNetBadge() {
+  const off = !navigator.onLine;
+  document.body.classList.toggle('offline', off);
+  $('#netBadge').hidden = !off;
+}
+window.addEventListener('offline', () => {
+  updateNetBadge();
+  toast('没有网络：地图和排好的路线还能看；重新计算会用存好的路程资料', 4000);
+});
+window.addEventListener('online', () => {
+  updateNetBadge();
+  retryN = 0;
+  if (currentView === 'map') {
+    toast('网络回来了，重新计算');
+    replan();
+  }
+});
+
+// 有网络时，先把整个行程所有地点之间的路程存好（之后没网络也能重算、换天）
+async function prefetchTripPairs(t, quiet = true) {
+  const pts = [...allHotels(t), ...t.places.filter(isLive)];
+  if (pts.length < 2) return true;
+  const profiles = t.settings.mode === 'auto' || t.settings.mode === 'transit' ? ['car', 'foot'] : [t.settings.mode];
+  try {
+    for (const pr of profiles) {
+      // 走路只需要近的地方；点太多时，每一天自己算就好
+      if (pr === 'foot' && pts.length > 40) continue;
+      await travelTable(pr, pts.slice(0, 90));
+    }
+    return true;
+  } catch (e) {
+    if (!quiet) console.warn(e);
+    return false;
+  }
+}
+
+/* ================= 跟着我走：省电 ================= */
+
+async function batteryWarn() {
+  try {
+    const b = await navigator.getBattery?.();
+    if (!b) return;
+    const check = () => {
+      if (follow && !b.charging && b.level <= 0.2 && !follow.lowWarned) {
+        follow.lowWarned = true;
+        toast(`电量剩 ${Math.round(b.level * 100)}%：跟着我走很耗电，建议插电或先关掉`, 5000);
+      }
+    };
+    check();
+    b.addEventListener('levelchange', check);
+  } catch {}
+}
+// 停着不动几分钟：降低定位频率、让屏幕可以关；一动就恢复
+function followPower(me, kmh) {
+  if (!follow) return;
+  if (!follow.anchor || haversine(follow.anchor, me) > 60 || (kmh ?? 0) > 6) {
+    follow.anchor = { lat: me.lat, lon: me.lon, at: Date.now() };
+    if (follow.low) {
+      follow.low = false;
+      restartWatch(true);
+      keepAwake(true);
+      $('#fhText').textContent = '继续跟随';
+    }
+    return;
+  }
+  if (!follow.low && Date.now() - follow.anchor.at > 4 * 60e3) {
+    follow.low = true;
+    restartWatch(false);
+    keepAwake(false);
+    toast('停着不动：已省电（定位变慢、屏幕可以关）', 3500);
+  }
+}
+function restartWatch(high) {
+  if (!follow) return;
+  if (follow.watch != null) navigator.geolocation.clearWatch(follow.watch);
+  follow.watch = navigator.geolocation.watchPosition(onFollow, (e) => {
+    toast(e.code === 1 ? '没有定位权限' : '拿不到位置');
+    stopFollow();
+  }, high ? { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 } : { enableHighAccuracy: false, maximumAge: 60000, timeout: 60000 });
+}
+
+/* ================= 自驾：路上的油站（OpenStreetMap 免费资料） ================= */
+
+let fuelMarkers = [];
+let fuelOn = false;
+const fuelCache = new Map();
+function routeSample(t) {
+  const lines = isMulti(t) && !t.curDay ? Array.from({ length: t.days }, (_, i) => t.dayPlans?.[i + 1]?.lines || []).flat() : t.plan?.lines || [];
+  const pts = lines.filter((l) => l.mode === 'car').flatMap((l) => l.coords);
+  const out = [];
+  let last = null;
+  for (const c of pts) {
+    if (!last || llDist(last, c) > 800) {
+      out.push(c);
+      last = c;
+    }
+  }
+  return out.slice(0, 600);
+}
+async function showFuel() {
+  const t = T();
+  const pts = routeSample(t);
+  if (!pts.length) return toast('这天没有开车的路线');
+  const key = pts.map((c) => `${c[1].toFixed(2)},${c[0].toFixed(2)}`).join('|');
+  toast('正在找路线附近的油站…');
+  let list = fuelCache.get(key);
+  if (!list) {
+    // 先拿路线范围（方框）里的油站，很快；再只留离路线 1.5 公里内的
+    const lats = pts.map((c) => c[1]);
+    const lons = pts.map((c) => c[0]);
+    const box = [Math.min(...lats) - 0.015, Math.min(...lons) - 0.015, Math.max(...lats) + 0.015, Math.max(...lons) + 0.015].map((x) => x.toFixed(4)).join(',');
+    // 油站在地图资料里常常画成一块（不是一个点）：点、线、范围都找，取中心
+    const q = `[out:json][timeout:20];nwr["amenity"="fuel"](${box});out center 400;`;
+    const ask = async (url) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 20000);
+      const r = await fetch(url, { method: 'POST', body: `data=${encodeURIComponent(q)}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+      if (!r.ok) throw Object.assign(new Error(`overpass ${r.status}`), { status: r.status });
+      return r.json();
+    };
+    try {
+      let data;
+      try {
+        data = await ask('https://overpass-api.de/api/interpreter');
+      } catch {
+        // 主服务很忙：换备用的
+        await new Promise((r) => setTimeout(r, 1500));
+        data = await ask('https://overpass.kumi.systems/api/interpreter');
+      }
+      list = data.elements
+        .map((x) => ({ lat: x.lat ?? x.center?.lat, lon: x.lon ?? x.center?.lon, name: x.tags?.brand || x.tags?.name || '油站', open: x.tags?.opening_hours === '24/7' }))
+        .filter((x) => x.lat != null && pts.some((c) => llDist(c, [x.lon, x.lat]) < 1500));
+      fuelCache.set(key, list);
+    } catch (e) {
+      return toast(`油站资料：${friendlyErr(e)}`);
+    }
+  }
+  clearFuel();
+  for (const f of list) {
+    const el = document.createElement('div');
+    el.className = 'fuel-marker';
+    el.innerHTML = ic('fuel', 13);
+    el.title = f.name;
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const box = document.createElement('div');
+      box.innerHTML = `<div class="popup-name">${esc(f.name)}${f.open ? ' · 24 小时' : ''}</div><div class="popup-btns"><button class="primary">导航去这个油站</button></div>`;
+      box.querySelector('button').addEventListener('click', () => goNav(f, 'driving'));
+      new maplibregl.Popup({ closeOnClick: true, maxWidth: '240px' }).setLngLat([f.lon, f.lat]).setDOMContent(box).addTo(map);
+    });
+    fuelMarkers.push(new maplibregl.Marker({ element: el }).setLngLat([f.lon, f.lat]).addTo(map));
+  }
+  fuelOn = true;
+  $('#btnFuel').classList.add('on');
+  toast(list.length ? `路线附近有 ${list.length} 个油站` : '路线附近的地图资料里没有油站');
+}
+function clearFuel() {
+  fuelMarkers.forEach((m) => m.remove());
+  fuelMarkers = [];
+  fuelOn = false;
+  $('#btnFuel')?.classList.remove('on');
+}
+$('#btnFuel').addEventListener('click', () => (fuelOn ? clearFuel() : showFuel()));
+
+/* ================= 资料只存在手机：提醒加到主屏幕、备份 ================= */
+
+const BACKUP_KEY = 'shunlu:backup-at';
+const backupAt = () => {
+  try {
+    return Number(localStorage.getItem(BACKUP_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+};
+function markBackup() {
+  try {
+    localStorage.setItem(BACKUP_KEY, String(Date.now()));
+  } catch {}
+}
+function updateSafetyCards() {
+  const has = state.trips.some((t) => t.places.length);
+  // iPhone 的 Safari：7 天没打开会清掉网站资料；加到主屏幕（装成 App）就不会
+  let snooze = 0;
+  try {
+    snooze = Number(localStorage.getItem('shunlu:ioswarn-until')) || 0;
+  } catch {}
+  $('#iosWarn').hidden = !(has && isIOS() && !isStandalone() && Date.now() > snooze);
+  // 一个星期没备份，而且之后有改过
+  const last = backupAt();
+  const changed = state.trips.some((t) => t.updated > last);
+  $('#backupNag').hidden = !(has && changed && Date.now() - last > 7 * 864e5 && $('#iosWarn').hidden);
+  $('#backupNag .bn-sub').textContent = last ? `上次备份：${fmtDate(last)}` : '还没有备份过';
+}
+$('#iosWarnX').addEventListener('click', () => {
+  try {
+    localStorage.setItem('shunlu:ioswarn-until', String(Date.now() + 3 * 864e5));
+  } catch {}
+  $('#iosWarn').hidden = true;
+});
+$('#backupNagGo').addEventListener('click', () => $('#btnExport').click());
+$('#iosWarnBackup').addEventListener('click', () => $('#btnExport').click());
+$('#backupNagX').addEventListener('click', () => {
+  markBackup();
+  updateSafetyCards();
+});
+// 请浏览器不要随便清掉资料（Android / 电脑的 Chrome 会答应）
+navigator.storage?.persist?.().catch(() => {});
+
+/* ================= 「更多」里的设定：塞车、字体大小、显示简单 / 详细 ================= */
+
+const VIEW_KEY = 'shunlu:view';
+let viewPrefs = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(VIEW_KEY)) || {};
+  } catch {
+    return {};
+  }
+})();
+function applyViewPrefs() {
+  document.body.dataset.fz = viewPrefs.fz || 'm';
+  document.body.classList.toggle('simple', viewPrefs.simple === true);
+}
+applyViewPrefs();
+function setViewPref(k, v) {
+  viewPrefs[k] = v;
+  try {
+    localStorage.setItem(VIEW_KEY, JSON.stringify(viewPrefs));
+  } catch {}
+  applyViewPrefs();
+}
+function renderSettings() {
+  const t = T();
+  const seg = (name, cur, opts) => `<div class="seg set-seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}" ${cur === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
+  $('#settingsBox').innerHTML = `
+    <div class="set-row"><div class="set-t">${ic('car', 16)} 路上多留时间（塞车）<small>${esc(TRAFFIC[trafficMode(t)].sub)}</small></div>
+      ${seg('setTraffic', trafficMode(t), Object.entries(TRAFFIC).map(([k, v]) => [k, v.label]))}</div>
+    <div class="set-row"><div class="set-t">${ic('edit', 16)} 字体大小</div>
+      ${seg('setFz', viewPrefs.fz || 'm', [['m', '标准'], ['l', '大'], ['xl', '特大']])}</div>
+    <div class="set-row"><div class="set-t">${ic('layers', 16)} 每天行程显示<small>简单：只看时间和地点，不显示时间条、日落、停车场这些</small></div>
+      ${seg('setSimple', viewPrefs.simple ? '1' : '0', [['0', '详细'], ['1', '简单']])}</div>
+    ${tzShift(t) ? `<div class="set-note">${ic('clock', 14)} ${esc(tzLabel(t))}</div>` : ''}`;
+}
+$('#settingsBox').addEventListener('change', (e) => {
+  const t = T();
+  if (e.target.name === 'setTraffic') {
+    t.settings.traffic = e.target.value;
+    save();
+    renderSettings();
+    toast(`路上多留时间：${TRAFFIC[e.target.value].label}，重新计算`);
+    t.dayPlans = {};
+    replan();
+  } else if (e.target.name === 'setFz') {
+    setViewPref('fz', e.target.value);
+  } else if (e.target.name === 'setSimple') {
+    setViewPref('simple', e.target.value === '1');
+    if (currentView === 'map') renderMap();
+  }
+});
+
 /* ================= 编辑地点 ================= */
 
 let editingId = null;
@@ -6399,6 +7001,7 @@ function openPlaceDialog(id) {
   $('#pdNote').value = p.note || '';
   $('#pdTicket').value = p.ticket ?? '';
   $('#pdFixed').value = p.fixedTime || '';
+  $('#pdBooking').value = p.booking || '';
   $('#pdTicketCur').textContent = cur(T()) || '金额';
   const osmFee = p.fee === 'yes' ? `地图资料：要收费${p.charge ? `（${p.charge}）` : ''}` : p.fee === 'no' ? '地图资料：免费' : p.charge ? `地图资料：${p.charge}` : '';
   $('#pdTicketHint').textContent = osmFee || '不知道就留空；免费就填 0';
@@ -6447,6 +7050,7 @@ $('#placeForm').addEventListener('submit', () => {
   p.stayMin = Math.max(0, Number($('#pdStay').value) || 0);
   p.note = $('#pdNote').value.trim();
   p.ticket = $('#pdTicket').value === '' ? null : Math.max(0, Number($('#pdTicket').value) || 0);
+  p.booking = $('#pdBooking').value || null;
   if (($('#pdFixed').value || null) !== (p.fixedTime || null)) {
     p.fixedTime = $('#pdFixed').value || null;
     setManual(T(), isMulti(T()) ? p.day : null, null); // 时间变了：重新排最顺的顺序
