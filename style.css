@@ -1190,3 +1190,18 @@ body[data-fz="xl"] :is(#nextCard, #sheetHead, .pk-box, dialog .dbody, dialog for
 /* 每天行程：简单显示 */
 body.simple #list .daybar, body.simple #list .sun-chip, body.simple #list .gold-chip, body.simple #list .park-btn,
 body.simple #list .park-chip, body.simple #list .stop .hours, body.simple #list .fuel-tip, body.simple .day-card .daybar { display: none !important; }
+
+/* ============ v23：每个地点自己选交通方式 ============ */
+.leg[data-legto] { cursor: pointer; }
+.leg-how { margin-left: 6px; padding: 2px 8px; font-size: 11.5px; font-weight: 700; border-radius: 999px; color: #1d4ed8; background: #eef3ff; border-color: transparent; gap: 3px; white-space: nowrap; }
+.leg-tr .leg-how, .leg-chain .leg-how { margin-left: 0; margin-top: 2px; align-self: flex-start; }
+.leg-tr .leg-how { display: inline-flex; margin-left: 6px; }
+.how-chip { cursor: pointer; background: #eef3ff !important; color: #1d4ed8 !important; }
+.how-chip svg { width: 12px; height: 12px; }
+.how-list button > span.how-ic { background: #eef3ff; color: #2563eb; }
+.how-list button > span.m-car { background: #2563eb; }
+.how-list button > span.m-foot { background: #059669; }
+.how-list button > span.m-bus { background: #7c3aed; }
+.how-list button.on { background: #eef3ff; }
+.pk-how { display: flex; flex-direction: column; gap: 6px; }
+.pk-how .seg span { font-size: 13px; padding: 7px 4px; }

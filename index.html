@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- 所有文件都放在同一层（没有文件夹），上传 GitHub 比较方便。改了 style.css / app.js 就把 v= 加一，手机才会拿到新版 -->
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
 
@@ -430,6 +430,7 @@
         <div class="small muted" id="pdTicketHint"></div>
       </div>
       <label id="pdDayWrap">安排在哪一天<select id="pdDay"></select></label>
+      <label>怎么去这里<select id="pdHow"><option value="">自动（按这趟的交通方式）</option><option value="car">开车</option><option value="foot">走路</option><option value="transit">公共交通</option></select></label>
       <label>门票 / 预约<select id="pdBooking"><option value="">不用预约</option><option value="need">要预约 / 买票（还没买，出发前提醒我）</option><option value="done">已经预约 / 买好了</option></select></label>
       <label>备注<textarea id="pdNote" rows="2" placeholder="例如：要先买票、想吃的店"></textarea></label>
       <div class="dialog-actions">
@@ -448,6 +449,15 @@
       <h3 id="pkTitle">加入这些地点？</h3>
       <p class="small muted">不要的按 ✕ 拿掉。加入后还可以在「已添加」里移除。</p>
       <div id="pkMiss" class="small note warn" hidden></div>
+      <div class="pk-how">
+        <div class="small muted">怎么去这些地方</div>
+        <div class="seg">
+          <label><input type="radio" name="pkHow" value="auto" checked><span>自动</span></label>
+          <label><input type="radio" name="pkHow" value="car"><span>开车</span></label>
+          <label><input type="radio" name="pkHow" value="foot"><span>走路</span></label>
+          <label><input type="radio" name="pkHow" value="transit"><span>公交</span></label>
+        </div>
+      </div>
       <div id="pkList" class="sres"></div>
       <div class="dialog-actions">
         <button type="button" id="pkCancel">再想想</button>
@@ -569,6 +579,13 @@
     <button type="button" class="menu-cancel" id="kbActCancel">取消</button>
   </dialog>
 
+  <!-- 怎么去这个地点 -->
+  <dialog id="howDialog" class="action-sheet">
+    <div class="kb-act-title" id="howTitle"></div>
+    <div id="howBody" class="menu-list how-list"></div>
+    <button type="button" class="menu-cancel" id="howCancel">取消</button>
+  </dialog>
+
   <!-- 一次贴上很多地点 -->
   <dialog id="bulkDialog">
     <div class="pk-box">
@@ -602,6 +619,6 @@
   <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script type="module" src="app.js?v=22"></script>
+  <script type="module" src="app.js?v=23"></script>
 </body>
 </html>

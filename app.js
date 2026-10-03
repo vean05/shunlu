@@ -1,9 +1,9 @@
-import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=22';
-import { optimize, evaluate } from './optimizer.js?v=22';
-import { arrangeDays } from './days.js?v=22';
-import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=22';
-import { placeHoursOn, minToHHMM, parseOpeningHours, setHolidayCheck } from './hours.js?v=22';
-import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=22';
+import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=23';
+import { optimize, evaluate } from './optimizer.js?v=23';
+import { arrangeDays } from './days.js?v=23';
+import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=23';
+import { placeHoursOn, minToHHMM, parseOpeningHours, setHolidayCheck } from './hours.js?v=23';
+import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=23';
 
 /* ================= 状态与保存 ================= */
 
@@ -1475,6 +1475,7 @@ let pickAfter = null;
 function confirmPicked(after = null, title = null, missing = []) {
   if (!picked.length) return after?.();
   pickAfter = after;
+  document.querySelectorAll('input[name="pkHow"]').forEach((r) => (r.checked = r.value === 'auto'));
   $('#pkMiss').hidden = !missing.length;
   $('#pkMiss').textContent = missing.length ? `找不到：${missing.join('、')}（可以自己再搜索，或换英文名字）` : '';
   renderPickDialog(title);
@@ -1504,7 +1505,12 @@ $('#pkCancel').addEventListener('click', () => {
 });
 $('#pkOk').addEventListener('click', () => {
   const list = picked.splice(0);
-  list.forEach((r) => addPlaceToTrip(r));
+  const how = document.querySelector('input[name="pkHow"]:checked')?.value || 'auto';
+  list.forEach((r) => {
+    const p = addPlaceToTrip(r);
+    if (p && how !== 'auto') p.how = how;
+  });
+  save();
   if ($('#addDialog').open) addedInDialog += list.length;
   $('#pickDialog').close();
   toast(`已加入 ${list.length} 个地点（共 ${T().places.filter((p) => !p.done).length} 个）`);
@@ -2352,7 +2358,13 @@ async function getOrigin(t, day = null) {
 // 查交通时间表，返回 leg(i, j) = { mode, dur(毫秒), dist(米) }
 async function buildTravel(t, pts, firstIsLive) {
   const s = t.settings;
-  const profiles = s.mode === 'auto' || s.mode === 'transit' ? ['car', 'foot'] : [s.mode];
+  const need = new Set(s.mode === 'auto' || s.mode === 'transit' ? ['car', 'foot'] : [s.mode]);
+  // 有地点指定了怎么去：那种交通方式的路程也要算
+  for (const p of pts) {
+    if (p.how === 'car' || p.how === 'transit') need.add('car');
+    if (p.how === 'foot' || p.how === 'transit') need.add('foot');
+  }
+  const profiles = [...need];
   let estimated = false;
   const tables = {};
   await Promise.all(
@@ -2384,8 +2396,14 @@ async function buildTravel(t, pts, firstIsLive) {
       }
       return { mode: pr, dur: d * 1000, dist };
     };
+    const how = pts[j]?.how;
     if (i === j) r = { mode: 'foot', dur: 0, dist: 0 };
-    else if (s.mode === 'auto' || s.mode === 'transit') {
+    else if (how === 'car' || how === 'foot') r = get(how);
+    else if (how === 'transit') {
+      // 自己选公交：先用估计，排好顺序后再查真实班次
+      const c = get('car');
+      r = { mode: 'transit', dur: c.dur * 1.6 + 12 * 60e3, dist: c.dist, est: true };
+    } else if (s.mode === 'auto' || s.mode === 'transit') {
       const f = get('foot');
       // 只有真的算得出走路路线、而且够近，才走路
       if (!f.guessed && f.dist <= (Number(s.walkMaxM) || 0)) r = f;
@@ -2582,7 +2600,7 @@ async function buildDayBundle(trip, day, { quiet = false } = {}) {
   const endIdx = end ? pts.length - 1 : -1;
   const { leg: rawLeg, walk, drive, estimated } = await buildTravel(trip, pts, origin?.kind === 'gps');
   // 自动模式：记住车停在哪里（走路逛完一组要走回车子）
-  const leg = s.mode === 'auto'
+  const pw = s.mode === 'auto'
     ? parkWalkLegs({
       pts,
       placeIdx: remaining.map((_, k) => placeBase + k),
@@ -2592,7 +2610,8 @@ async function buildDayBundle(trip, day, { quiet = false } = {}) {
       drive,
       walkMax: Number(s.walkMaxM) || 0,
     })
-    : rawLeg;
+    : null;
+  const leg = pw ? (i, j) => (pts[j]?.how && pts[j].how !== 'auto' ? rawLeg(i, j) : pw(i, j)) : rawLeg;
 
   // 节点编号 → pts 下标（没有起点时，0 号是虚拟起点）
   const n = remaining.length;
@@ -2633,7 +2652,7 @@ async function refineTransit(b, order) {
     }
     const w = b.walk(a, c);
     // 公交没比走路快 5 分钟以上（例如要先走很远去车站），就直接走路
-    if (w && w.dur <= (plan ? plan.dur : base.dur) + 5 * 60e3 && w.dist <= 2500) b.ov.set(`${a},${c}`, w);
+    if (b.pts[c].how !== 'transit' && w && w.dur <= (plan ? plan.dur : base.dur) + 5 * 60e3 && w.dist <= 2500) b.ov.set(`${a},${c}`, w);
     else b.ov.set(`${a},${c}`, plan ? { mode: 'transit', dur: plan.dur, dist: base.dist, transit: plan } : { mode: 'transit', dur: base.dur, dist: base.dist, noTransit: true });
     changed = true;
   }
@@ -2670,7 +2689,7 @@ async function doReplan(trip, day) {
   const { order, manual } = chosenOrder(b);
   applyOrder(b, order, manual);
   // 公交：先显示估计，再查真实班次后更新
-  if (trip.settings.mode === 'transit') {
+  if (trip.settings.mode === 'transit' || b.remaining.some((p) => p.how === 'transit')) {
     setStatus('正在查公交班次…');
     if (await refineTransit(b, order)) {
       if (lastBundle === b) applyOrder(b, chosenOrder(b).order, manual);
@@ -3089,8 +3108,11 @@ function parkHere(legIn, nextId) {
   return !!next && (next.mode === 'foot' || next.parts?.[0]?.mode === 'foot');
 }
 
-function legHtml(l) {
+// to = 这一段去哪个地点（有的话，按一下可以换交通方式）
+function legHtml(l, to = null) {
   if (!l) return '';
+  const tap = to ? ` data-legto="${to}"` : '';
+  const how = to ? `<button type="button" class="leg-how" data-legto="${to}">${ic('edit', 12)} 换方式</button>` : '';
   if (l.mode === 'transit') {
     const routes = l.transit ? [...new Set(l.transit.legs.filter((x) => x.mode !== 'WALK').map((x) => x.route).filter(Boolean))].join(' / ') : '';
     const kind = l.noTransit ? 'car' : transitKind(l.transit);
@@ -3098,8 +3120,8 @@ function legHtml(l) {
     const detail = l.transit
       ? transitSteps(l.transit)
       : l.noTransit ? `这段没找到公交，打车大约 ${fmtDur(l.dur / 1.6)}` : '估计时间，正在查班次…';
-    return `<div class="leg transit m-${kind}"><div class="tl-time"></div><div class="tl-rail"><i></i></div>
-      <div class="leg-tr"><span class="leg-pill m-${kind}">${modeIcon(kind, 15)} ${label} ${fmtDur(l.dur)}${routes ? ` · ${esc(routes)}` : ''}</span><div class="leg-detail">${esc(detail)}</div></div></div>`;
+    return `<div class="leg transit m-${kind}"${tap}><div class="tl-time"></div><div class="tl-rail"><i></i></div>
+      <div class="leg-tr"><span class="leg-pill m-${kind}">${modeIcon(kind, 15)} ${label} ${fmtDur(l.dur)}${routes ? ` · ${esc(routes)}` : ''}</span>${how}<div class="leg-detail">${esc(detail)}</div></div></div>`;
   }
   if (l.parts) {
     // 走回停车处 → 开车 → 走过去
@@ -3110,10 +3132,10 @@ function legHtml(l) {
         : i === 0 ? `走回停车处${x.to.name ? `「${x.to.name.split(' ')[0]}」` : ''} ${fmtDur(x.dur)}` : `停好车走过去 ${fmtDur(x.dur)}`;
       return `<span class="leg-pill m-${k}">${modeIcon(k, 15)} ${esc(txt)}</span>`;
     };
-    return `<div class="leg car combo"><div class="tl-time"></div><div class="tl-rail"><i></i></div><div class="leg-tr leg-chain">${l.parts.map(pill).join('')}</div></div>`;
+    return `<div class="leg car combo"${tap}><div class="tl-time"></div><div class="tl-rail"><i></i></div><div class="leg-tr leg-chain">${l.parts.map(pill).join('')}${how}</div></div>`;
   }
   const k = l.mode === 'car' ? 'car' : 'foot';
-  return `<div class="leg ${l.mode}"><div class="tl-time"></div><div class="tl-rail"><i></i></div><span class="leg-pill m-${k}">${modeIcon(k, 15)} ${MODE_NAME[k]} ${fmtDur(l.dur)} · ${fmtDist(l.dist)}</span>${l.traffic ? '<span class="traffic-tag">含塞车</span>' : ''}</div>`;
+  return `<div class="leg ${l.mode}"${tap}><div class="tl-time"></div><div class="tl-rail"><i></i></div><span class="leg-pill m-${k}">${modeIcon(k, 15)} ${MODE_NAME[k]} ${fmtDur(l.dur)} · ${fmtDist(l.dist)}</span>${l.traffic ? '<span class="traffic-tag">含塞车</span>' : ''}${how}</div>`;
 }
 
 function renderMap() {
@@ -3186,7 +3208,7 @@ function renderMap() {
     const p = t.places.find((x) => x.id === id);
     const i = info.get(id);
     const st = i.st;
-    html += legHtml(i.legIn);
+    html += legHtml(i.legIn, id);
     let note = '';
     if (st.flag === 'closed') note = `<div class="note bad closed-note">${ic('alert', 14)} ${fmtClock(st.arrive)} 到的时候已经关门，建议跳过或改天</div>${moveDayBtns(t, p)}`;
     else if (st.flag === 'short') note = `<div class="note warn">${ic('clock', 14)} ${fmtClock(st.closeAt)} 关门，只能待 ${fmtDur(st.closeAt - st.start)}</div>`;
@@ -3207,7 +3229,7 @@ function renderMap() {
           <div class="si-thumb sm" data-prev="${planned.indexOf(id)}">${kindIcon(p.kind)}</div>
           <div class="body">
             <div class="name">${esc(p.name)}</div>
-            <div class="chips-row">${p.fixedTime ? `<span class="chip fix-chip" data-act="time">${ic('pinned', 12)} ${p.checkin ? `${esc(p.fixedTime)} 起入住` : `固定 ${esc(p.fixedTime)}`}</span>` : ''}${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}${sunChip(p, st, sun)}${bookingChip(p)}</div>
+            <div class="chips-row">${p.how ? `<span class="chip how-chip" data-act="how">${modeIcon(HOW_ICON[p.how], 13, MODE_COLOR[HOW_ICON[p.how]], '#eef3ff')} 指定${HOW[p.how]}</span>` : ''}${p.fixedTime ? `<span class="chip fix-chip" data-act="time">${ic('pinned', 12)} ${p.checkin ? `${esc(p.fixedTime)} 起入住` : `固定 ${esc(p.fixedTime)}`}</span>` : ''}${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}${sunChip(p, st, sun)}${bookingChip(p)}</div>
             <div class="hours">${hoursLine(p)}</div>
           </div>
         </div>
@@ -3287,6 +3309,7 @@ $('#list').addEventListener('click', (e) => {
   else if (act === 'down') moveStop(p.id, 1);
   else if (act === 'undo') markDone(p.id, false);
   else if (act === 'moveday') movePlaceToDay(p, Number(actEl.dataset.day));
+  else if (act === 'how') openHow(p);
   else if (act === 'time') openTimeDialog(p);
   else if (act === 'booked') {
     p.booking = 'done';
@@ -3731,6 +3754,11 @@ function renderOverview(t) {
 
 $('#list').addEventListener('click', (e) => {
   if (e.target.closest('.nav-all')) return openNavAll();
+  const legTo = e.target.closest('[data-legto]');
+  if (legTo) {
+    const p = T().places.find((x) => x.id === legTo.dataset.legto);
+    if (p) return openHow(p);
+  }
   if (e.target.closest('[data-daytime]')) return openDayTimeDialog();
   const mv = e.target.closest('[data-closedid] [data-act="moveday"]');
   if (mv) {
@@ -6274,6 +6302,7 @@ function renderPlaces() {
       `停留 ${fmtDur((Number(p.stayMin) || 0) * 60e3)}`,
       p.fixedTime ? (p.checkin ? `${p.fixedTime} 起入住` : `固定 ${p.fixedTime}`) : null,
       p.booking === 'need' ? '要预约，还没买' : p.booking === 'done' ? '已买票' : null,
+      p.how ? `指定${HOW[p.how]}` : null,
     ].filter(Boolean).join(' · ');
     items.push(p);
     return `<div class="pl-row${p.done ? ' done' : ''}" data-id="${p.id}">
@@ -6960,6 +6989,8 @@ function renderSettings() {
   const t = T();
   const seg = (name, cur, opts) => `<div class="seg set-seg">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}" ${cur === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}</div>`;
   $('#settingsBox').innerHTML = `
+    <div class="set-row"><div class="set-t">${ic('route', 16)} 这趟主要的交通方式<small>每个地点也可以自己指定：在「每天」按交通方式那一段（例如「开车 10分钟」）</small></div>
+      ${seg('setMode', t.settings.mode, [['auto', '自动'], ['car', '开车'], ['foot', '走路'], ['transit', '公交']])}</div>
     <div class="set-row"><div class="set-t">${ic('car', 16)} 路上多留时间（塞车）<small>${esc(TRAFFIC[trafficMode(t)].sub)}</small></div>
       ${seg('setTraffic', trafficMode(t), Object.entries(TRAFFIC).map(([k, v]) => [k, v.label]))}</div>
     <div class="set-row"><div class="set-t">${ic('edit', 16)} 字体大小</div>
@@ -6970,7 +7001,14 @@ function renderSettings() {
 }
 $('#settingsBox').addEventListener('change', (e) => {
   const t = T();
-  if (e.target.name === 'setTraffic') {
+  if (e.target.name === 'setMode') {
+    t.settings.mode = e.target.value;
+    save();
+    toast(`主要交通方式：${{ auto: '自动', car: '开车', foot: '走路', transit: '公交' }[e.target.value]}，重新计算`);
+    t.dayPlans = {};
+    t.plan = null;
+    replan();
+  } else if (e.target.name === 'setTraffic') {
     t.settings.traffic = e.target.value;
     save();
     renderSettings();
@@ -6984,6 +7022,41 @@ $('#settingsBox').addEventListener('change', (e) => {
     if (currentView === 'map') renderMap();
   }
 });
+
+/* ================= 每个地点自己选：开车 / 走路 / 公共交通 ================= */
+
+const HOW = { car: '开车', foot: '走路', transit: '公共交通' };
+const HOW_ICON = { car: 'car', foot: 'foot', transit: 'bus' };
+let howId = null;
+function openHow(p) {
+  howId = p.id;
+  const cur = p.how || 'auto';
+  const opt = (v, icon, title, sub) => `<button type="button" data-how="${v}" class="${cur === v ? 'on' : ''}"><span class="how-ic${v === 'auto' ? '' : ` m-${HOW_ICON[v]}`}">${v === 'auto' ? ic('sparkles', 18) : modeIcon(HOW_ICON[v], 18)}</span><div><b>${title}${cur === v ? ' ✓' : ''}</b><span>${sub}</span></div></button>`;
+  $('#howTitle').textContent = `怎么去「${shortName(p)}」？`;
+  $('#howBody').innerHTML =
+    opt('auto', '', '自动', '按这趟的交通方式，App 选最快、最方便的') +
+    opt('car', 'car', '开车', '会算停车时间；可以找附近停车场') +
+    opt('foot', 'foot', '走路', '近的地方走过去，不用找停车位') +
+    opt('transit', 'bus', '公共交通', '巴士、地铁、火车；会查真实班次');
+  $('#howDialog').showModal();
+}
+$('#howBody').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-how]');
+  if (!b) return;
+  const t = T();
+  const p = t.places.find((x) => x.id === howId);
+  $('#howDialog').close();
+  if (!p) return;
+  const v = b.dataset.how === 'auto' ? null : b.dataset.how;
+  if ((p.how || null) === v) return;
+  p.how = v;
+  save();
+  toast(v ? `去「${shortName(p)}」改成${HOW[v]}，重新计算` : `去「${shortName(p)}」改回自动`, 3000);
+  if (boardOn() && p.day) return kbRecompute([p.day]);
+  renderMap();
+  replan();
+});
+$('#howCancel').addEventListener('click', () => $('#howDialog').close());
 
 /* ================= 编辑地点 ================= */
 
@@ -7002,6 +7075,7 @@ function openPlaceDialog(id) {
   $('#pdTicket').value = p.ticket ?? '';
   $('#pdFixed').value = p.fixedTime || '';
   $('#pdBooking').value = p.booking || '';
+  $('#pdHow').value = p.how || '';
   $('#pdTicketCur').textContent = cur(T()) || '金额';
   const osmFee = p.fee === 'yes' ? `地图资料：要收费${p.charge ? `（${p.charge}）` : ''}` : p.fee === 'no' ? '地图资料：免费' : p.charge ? `地图资料：${p.charge}` : '';
   $('#pdTicketHint').textContent = osmFee || '不知道就留空；免费就填 0';
@@ -7051,6 +7125,7 @@ $('#placeForm').addEventListener('submit', () => {
   p.note = $('#pdNote').value.trim();
   p.ticket = $('#pdTicket').value === '' ? null : Math.max(0, Number($('#pdTicket').value) || 0);
   p.booking = $('#pdBooking').value || null;
+  p.how = $('#pdHow').value || null;
   if (($('#pdFixed').value || null) !== (p.fixedTime || null)) {
     p.fixedTime = $('#pdFixed').value || null;
     setManual(T(), isMulti(T()) ? p.day : null, null); // 时间变了：重新排最顺的顺序
