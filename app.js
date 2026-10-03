@@ -1,9 +1,9 @@
-import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=18';
-import { optimize, evaluate } from './optimizer.js?v=18';
-import { arrangeDays } from './days.js?v=18';
-import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=18';
-import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=18';
-import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=18';
+import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=20';
+import { optimize, evaluate } from './optimizer.js?v=20';
+import { arrangeDays } from './days.js?v=20';
+import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=20';
+import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=20';
+import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=20';
 
 /* ================= 状态与保存 ================= */
 
@@ -115,6 +115,9 @@ function startOfDay(ms) {
 // 是不是同一个地方：编号一样就是；两边都有编号但不一样就不是（隔壁的店坐标可能几乎一样）；
 // 没有编号时，才看坐标很近、而且名字差不多
 const nameKey = (x) => String(x || '').toLowerCase().replace(/[\s()（）\-·,.]/g, '');
+// 还要去、而且没放进「备选」的地点
+const isLive = (p) => !p.done && !p.parked;
+
 function samePlace(a, b) {
   if (a.osm && b.osm && a.osm === b.osm) return true;
   if (a.wikidata && b.wikidata && a.wikidata === b.wikidata) return true;
@@ -180,10 +183,18 @@ function showView(name) {
     updateGeoWatch();
     $('#geoPrompt').hidden = true;
   }
-  if (name === 'trips') renderTrips();
+  if (name === 'trips') {
+    renderTrips();
+    if (!dlgStack.length) disarmBack();
+  } else armBack();
   if (name === 'map') {
     ensureMap();
     map.resize();
+    const t = T();
+    nextFocus = null;
+    daysMode = 'list';
+    setDaysMode('list');
+    setTab(state.tripTab && state.tripTabFor === t?.id ? state.tripTab : defaultTab(t));
     renderMap();
   }
 }
@@ -969,6 +980,11 @@ function addPlaceToTrip(r) {
   const t = T();
   const dup = t.places.find((p) => samePlace(p, r));
   if (dup) {
+    if (dup.parked) {
+      dup.parked = false;
+      save();
+      toast(`「${dup.name}」从备选拿回来了`);
+    }
     if (dup.done) {
       dup.done = false;
       save();
@@ -1951,7 +1967,7 @@ function setupDone(back = false) {
   if (isMulti(t)) {
     t.curDay = 0;
     // 有还没分到哪天的地点、或是第一次，就自动分配
-    const need = t.arrangeSig !== arrangeSig(t) || t.places.some((p) => !p.done && !(p.day >= 1 && p.day <= t.days));
+    const need = t.arrangeSig !== arrangeSig(t) || t.places.some((p) => isLive(p) && !(p.day >= 1 && p.day <= t.days));
     (need ? arrangeTrip(t) : Promise.resolve()).then(() => replan()).catch((e) => setStatus(`分配失败：${e.message}`, true));
   } else replan();
 }
@@ -2064,6 +2080,7 @@ function drawMarkers() {
   if (isMulti(t) && !t.curDay) {
     // 总览：号码是那天的第几站，颜色是哪一天
     for (const p of t.places) {
+      if (p.parked) continue;
       const plan = t.dayPlans?.[p.day];
       const num = plan ? plan.order.filter((id) => !t.places.find((x) => x.id === id)?.done).indexOf(p.id) + 1 : 0;
       const el = (cls, text) => {
@@ -2116,8 +2133,10 @@ function fitAll() {
   pts.forEach((p) => b.extend(p));
   // 大屏幕：列表在左边；手机：列表在下面
   const wide = innerWidth >= 900;
-  const sheetH = $('#sheet').getBoundingClientRect().height;
-  const padding = wide ? { top: 60, left: 400 + 50, right: 90, bottom: 50 } : { top: 90, left: 40, right: 70, bottom: sheetH + 30 };
+  const bottom = tab === 'map' ? $('#nextCard').offsetHeight + $('#tripTabs').offsetHeight + 30 : 40;
+  const padding = wide
+    ? { top: 60, left: tab === 'map' ? 50 : 400 + 50, right: 90, bottom }
+    : { top: 90, left: 40, right: 70, bottom };
   map.fitBounds(b, { padding, maxZoom: 15, duration: 600 });
 }
 
@@ -2515,7 +2534,7 @@ async function buildDayBundle(trip, day, { quiet = false } = {}) {
   const s = trip.settings;
   const startTime = departTime(trip, day);
   const planDate = new Date(startTime);
-  const active = trip.places.filter((p) => !p.done && (day == null || p.day === day));
+  const active = trip.places.filter((p) => isLive(p) && (day == null || p.day === day));
   // 整天休息的地方不排进路线，另外列出来
   const closedIds = active
     .filter((p) => {
@@ -2724,7 +2743,7 @@ async function replanAllDays(trip) {
 /* ---- 多天：把地点分到每一天 ---- */
 
 async function arrangeTrip(trip) {
-  const places = trip.places.filter((p) => !p.done);
+  const places = trip.places.filter(isLive);
   if (!places.length) return;
   setStatus(`正在把 ${places.length} 个地点分到 ${trip.days} 天…`);
   const s = trip.settings;
@@ -2838,7 +2857,7 @@ function arrangeSig(t) {
 
 // 总览时加的地点：等真实路程算好，改放到「离那天的地点开车最近」的那天
 async function refineDay(t, p) {
-  const others = t.places.filter((x) => x !== p && !x.done && x.day >= 1 && x.day <= t.days);
+  const others = t.places.filter((x) => x !== p && isLive(x) && x.day >= 1 && x.day <= t.days);
   if (!others.length) return;
   const rows = await travelRow('car', p, others).catch(() => null);
   if (!rows) return;
@@ -2895,7 +2914,7 @@ function bundleFits(t) {
   if (!lastBundle || lastBundle.trip !== t || lastBundle.day !== day) return false;
   const ids = lastBundle.remaining.map((p) => p.id).sort().join();
   const now = t.places
-    .filter((p) => !p.done && (day == null || p.day === day) && !(t.plan?.closedIds || []).includes(p.id))
+    .filter((p) => isLive(p) && (day == null || p.day === day) && !(t.plan?.closedIds || []).includes(p.id))
     .map((p) => p.id).sort().join();
   return ids === now;
 }
@@ -3078,11 +3097,19 @@ function renderMap() {
   renderDayTabs(t);
   drawMarkers();
   drawRoute();
+  renderNextCard();
+  if (tab === 'places') renderPlaces();
+  if (tab === 'more') renderMore();
+  $('#daysMode').hidden = !(isMulti(t) && !t.curDay);
+  if (boardOn()) {
+    if (t.curDay) setDaysMode('list');
+    else return renderBoard();
+  }
   if (isMulti(t) && !t.curDay) return renderOverview(t);
   const list = $('#list');
   const plan = t.plan;
   const inDay = (p) => !isMulti(t) || p.day === t.curDay;
-  const active = t.places.filter((p) => !p.done && inDay(p));
+  const active = t.places.filter((p) => isLive(p) && inDay(p));
   const done = t.places.filter((p) => p.done && inDay(p));
 
   if (!t.places.length) {
@@ -3233,8 +3260,12 @@ $('#list').addEventListener('click', (e) => {
 });
 
 function focusPlace(id) {
-  setSheet('peek');
   highlightMarker(id);
+  if (tab === 'map') {
+    nextFocus = id;
+    renderNextCard();
+    return;
+  }
   const row = document.querySelector(`.stop[data-id="${id}"]`) || document.querySelector(`.dc-item[data-id="${id}"]`);
   document.querySelectorAll('.stop.hl, .dc-item.hl').forEach((x) => x.classList.remove('hl'));
   if (row) {
@@ -3546,6 +3577,7 @@ function renderDayTabs(t) {
   $('#dayTabs').hidden = !multi;
   const overview = multi && !t.curDay;
   $('#btnReorder').hidden = overview;
+  $('#btnPreview').hidden = overview;
   $('#btnArrange').hidden = !multi;
   $('#tripSub').textContent = !multi ? (t.dest?.name || '') : overview ? `${t.days} 天 · ${fmtDay(t, 1)} 起` : `第 ${t.curDay} 天 · ${fmtDay(t, t.curDay)}`;
   if (!multi) return;
@@ -3564,6 +3596,7 @@ function renderDayTabs(t) {
 function switchDay(d) {
   const t = T();
   if (reorderMode) setReorderMode(false);
+  nextFocus = null;
   t.curDay = d;
   t.plan = d ? t.dayPlans?.[d] || null : null;
   save();
@@ -3637,10 +3670,15 @@ function renderOverview(t) {
       ${doneHere.length && left.length ? `<div class="dc-done">${ic('check', 13)} 已去过 ${doneHere.length} 个</div>` : ''}
     </div>`;
   }
-  const unassigned = active.filter((p) => !(p.day >= 1 && p.day <= t.days));
+  const unassigned = active.filter((p) => !p.parked && !(p.day >= 1 && p.day <= t.days));
   if (unassigned.length) {
     html += `<div class="day-card" style="--dc:#94a3b8"><div class="dc-head"><span class="dc-badge">未分配</span><div class="dc-h-main"><b>${unassigned.length} 个地点还没分到哪一天</b><span>右上角 ⋯ →「重新分配每一天」</span></div></div>
       <div class="dc-list">${unassigned.map((p) => `<div class="dc-item" data-id="${p.id}"><span class="dc-time"></span><span class="dc-dot"></span><span class="dc-name">${esc(p.name)}</span></div>`).join('')}</div></div>`;
+  }
+  const parked = active.filter((p) => p.parked);
+  if (parked.length) {
+    html += `<div class="day-card" style="--dc:#cbd5e1"><div class="dc-head" data-board="1"><span class="dc-badge" style="color:#475569">备选</span><div class="dc-h-main"><b>先不去（${parked.length}）</b><span>不排进路线；想去就在看板拖回某一天</span></div><span class="dc-go">看板 ›</span></div>
+      <div class="dc-list">${parked.map((p) => `<div class="dc-item" data-id="${p.id}"><span class="dc-time"></span><span class="dc-dot"></span><span class="dc-name">${esc(p.name)}</span></div>`).join('')}</div></div>`;
   }
   html += `<p class="small muted center">分配方法：同一区的地点放同一天，避开休息日，每天时间尽量平均。<br>想把某个地点固定在某一天：点它 → 编辑 → 「安排在」</p>`;
   list.innerHTML = html;
@@ -3662,6 +3700,7 @@ $('#list').addEventListener('click', (e) => {
   }
   const bar = e.target.closest('[data-barid]');
   if (bar) return focusPlace(bar.dataset.barid);
+  if (e.target.closest('[data-board]')) return openBoard();
   const go = e.target.closest('[data-goday]');
   if (go) return switchDay(Number(go.dataset.goday));
   const item = e.target.closest('.dc-item');
@@ -5029,7 +5068,7 @@ function highlightMarker(id, pan = false) {
   if (!m || tour || follow?.center) return;
   // 标记被列表挡住 / 在画面外：轻轻移过去
   const wide = innerWidth >= 900;
-  const sheetH = wide ? 0 : $('#sheet').getBoundingClientRect().height;
+  const sheetH = wide || tab !== 'map' ? 0 : $('#nextCard').offsetHeight + $('#tripTabs').offsetHeight;
   const pt = map.project(m.getLngLat());
   const r = map.getContainer().getBoundingClientRect();
   const left = wide ? 400 + 30 : 30;
@@ -5046,7 +5085,7 @@ function highlightMarker(id, pan = false) {
     if (raf) return;
     raf = requestAnimationFrame(() => {
       raf = 0;
-      if ($('#sheet').dataset.state === 'full' || list.classList.contains('drag-on')) return;
+      if (innerWidth < 900 || list.classList.contains('drag-on')) return;
       const top = list.getBoundingClientRect().top + 8;
       const cards = [...list.querySelectorAll('.stop[data-id]:not(.simple), .dc-item[data-id]')];
       const first = cards.find((c) => c.getBoundingClientRect().bottom > top + 30);
@@ -5197,7 +5236,11 @@ function stopTour(finished = false) {
   if (finished) toast('预览完毕');
 }
 
-$('#btnPreview').addEventListener('click', () => (tour ? stopTour() : startTour()));
+$('#btnPreview').addEventListener('click', () => {
+  if (tour) return stopTour();
+  if (tab !== 'map') setTab('map');
+  setTimeout(startTour, 60);
+});
 $('#tbStop').addEventListener('click', () => stopTour());
 
 /* ================= 行程图片：路线地图 + 每一站，一张图分享出去 ================= */
@@ -5573,7 +5616,7 @@ function timeRow(id, label, value, sub = '') {
 
 function openTimeDialog(p) {
   const t = T();
-  const st = t.plan?.stops.find((x) => x.id === p.id);
+  const st = t.plan?.stops.find((x) => x.id === p.id) || t.dayPlans?.[p.day]?.stops.find((x) => x.id === p.id);
   timeCtx = { kind: 'stop', id: p.id };
   $('#tmTitle').textContent = `几点去「${shortName(p)}」？`;
   $('#tmHint').textContent = '定好后会照这个时间去，其他地点自动排在前后；早到会提醒你，晚到会告诉你晚多少。';
@@ -5630,13 +5673,16 @@ function setCheckin(t, day, hhmm) {
   t.places.push(p);
 }
 
-function afterTimeChange(msg) {
+function afterTimeChange(msg, day = undefined) {
   const t = T();
-  setManual(t, isMulti(t) ? t.curDay : null, null); // 时间变了：重新找最顺的顺序
+  if (day === undefined) day = isMulti(t) ? t.curDay : null;
+  setManual(t, day, null); // 时间变了：重新找最顺的顺序
   save();
   $('#timeDialog').close();
-  renderMap();
   toast(msg, 3000);
+  // 在看板里改的：只重算那一天
+  if (boardOn() && day) return kbRecompute([day]);
+  renderMap();
   replan();
 }
 
@@ -5648,7 +5694,7 @@ $('#tmOk').addEventListener('click', () => {
     const v = $('#tmA').value;
     if (!p || !v) return toast('请选一个时间');
     p.fixedTime = v;
-    return afterTimeChange(`「${shortName(p)}」固定 ${v} 开始，重新排其他地点`);
+    return afterTimeChange(`「${shortName(p)}」固定 ${v} 开始，重新排其他地点`, isMulti(t) ? p.day : null);
   }
   const key = manualKey(timeCtx.day);
   const a = $('#tmA').value;
@@ -5663,13 +5709,638 @@ $('#tmClear').addEventListener('click', () => {
   if (timeCtx.kind === 'stop') {
     const p = t.places.find((x) => x.id === timeCtx.id);
     if (p) p.fixedTime = null;
-    return afterTimeChange('已恢复自动安排时间');
+    return afterTimeChange('已恢复自动安排时间', p && isMulti(t) ? p.day : null);
   }
   if (t.dayDepart) delete t.dayDepart[manualKey(timeCtx.day)];
   setCheckin(t, timeCtx.day, null);
   afterTimeChange('已恢复原本的出发时间');
 });
 $('#tmCancel').addEventListener('click', () => $('#timeDialog').close());
+
+/* ================= 看板：拖动调整每天的安排（另外一个全屏窗口） ================= */
+//
+// 每一天一栏，最后一栏是「备选 · 先不去」。
+//   拖到别天：那个地点会「🔒 固定在那天」（之后按「全部重新分配」也不会被移走）
+//     · 模式「自动排最顺」：放进去后，那天整天重新找最顺的顺序
+//     · 模式「照我放的位置」：照你放的位置排，时间跟着重算
+//   同一天上下拖：照你排的顺序（那天显示「你的顺序 · 改回最顺」，按一下就回到最顺）
+//   想要某个时间段：点卡片 →「固定几点去」（📌），其他地点会排在前后
+
+let kbBusy = new Set(); // 正在重新计算的天
+let kbQueue = Promise.resolve();
+const kbMode = () => state.boardMode || 'auto';
+
+function boardCols(t) {
+  const cols = [];
+  for (let d = 1; d <= t.days; d++) {
+    const plan = t.dayPlans?.[d];
+    const ps = t.places.filter((p) => isLive(p) && p.day === d);
+    const ordered = plan ? plan.order.map((id) => ps.find((p) => p.id === id)).filter(Boolean) : [];
+    cols.push({ d, plan, items: [...ordered, ...ps.filter((p) => !ordered.includes(p))] });
+  }
+  // 备选：自己放进来的 + 还没分到哪天的
+  cols.push({ d: 0, items: t.places.filter((p) => !p.done && (p.parked || !(p.day >= 1 && p.day <= t.days))) });
+  return cols;
+}
+
+function kbCard(p, plan) {
+  const st = plan?.stops.find((x) => x.id === p.id);
+  const closed = plan?.closedIds?.includes(p.id) || st?.flag === 'closed';
+  const time = p.parked ? '先不去' : closed ? '这天关门 / 休息' : st ? `${fmtClock(st.start)}–${fmtClock(st.depart)}` : kbBusy.has(p.day) ? '计算中…' : p.day ? '等待计算' : '还没分配';
+  const cls = closed ? 'bad' : st?.flag ? 'warn' : '';
+  return `<div class="kb-card ${cls}" data-id="${p.id}">
+    <button type="button" class="kb-grip" aria-label="按住拖动">${ic('grip', 18)}</button>
+    <div class="kb-main">
+      <div class="kb-time">${esc(time)}${st?.flag === 'late' ? ' · 会晚到' : st?.flag === 'short' ? ' · 快关门' : ''}</div>
+      <div class="kb-name">${esc(p.name)}</div>
+      ${p.fixedTime || (p.dayLocked && p.day) ? `<div class="kb-tags">${p.fixedTime ? `<span class="kt-time">${ic('pinned', 11)} ${p.checkin ? `${esc(p.fixedTime)} 起入住` : `固定 ${esc(p.fixedTime)}`}</span>` : ''}${p.dayLocked && p.day ? `<span class="kt-day">${ic('lock', 11)} 固定这天</span>` : ''}</div>` : ''}
+    </div>
+    <span class="kb-more">${ic('more', 16)}</span>
+  </div>`;
+}
+
+function renderBoard() {
+  const t = T();
+  if (!t) return;
+  const scroll = $('#kbBoard').scrollLeft;
+  $('#kbBoard').innerHTML = boardCols(t)
+    .map((c) => {
+      if (!c.d) {
+        return `<section class="kb-col park" data-day="0">
+          <header><div class="kb-h1"><span class="dc-badge">备选</span><b>先不去</b></div><span>拖进来就不排进路线；想去再拖回某一天</span></header>
+          <div class="kb-list">${c.items.map((p) => kbCard(p, null)).join('') || '<div class="kb-empty">拖到这里 = 先不去</div>'}</div></section>`;
+      }
+      const plan = c.plan;
+      const busy = kbBusy.has(c.d);
+      const end = plan?.stops?.length ? plan.endArrive ?? plan.finish : null;
+      const late = end && end > dayClock(t, c.d, t.settings.dayEnd || '21:00');
+      const manual = !!getManual(t, c.d);
+      return `<section class="kb-col${busy ? ' busy' : ''}" data-day="${c.d}" style="--dc:${dayColor(c.d)}">
+        <header>
+          <div class="kb-h1"><span class="dc-badge">第${c.d}天</span><b>${esc(fmtDay(t, c.d))}</b></div>
+          <span>${c.items.length} 个地点${plan?.stops?.length ? ` · ${fmtClock(plan.startTime)}–${fmtClock(end)}` : ''}${busy ? ' · 重新计算中…' : ''}</span>
+          ${late ? `<span class="kb-warn">${ic('alert', 12)} 太满：${fmtClock(end)} 才结束</span>` : ''}
+          ${manual ? `<button type="button" class="kb-auto" data-auto="${c.d}">${ic('refresh', 13)} 你的顺序 · 改回最顺</button>` : ''}
+          ${plan?.stops?.length ? `<div class="kb-bar">${dayBarHtml(t, plan, true)}</div>` : ''}
+        </header>
+        <div class="kb-list">${c.items.map((p) => kbCard(p, plan)).join('') || '<div class="kb-empty">把地点拖到这里</div>'}</div>
+      </section>`;
+    })
+    .join('');
+  $('#kbBoard').scrollLeft = scroll;
+  document.querySelectorAll('input[name="kbMode"]').forEach((r) => (r.checked = r.value === kbMode()));
+}
+
+
+// 重新算某几天（一天一天来，算好一天就更新那一栏）
+function kbRecompute(days) {
+  const t = T();
+  days = [...new Set(days)].filter((d) => d >= 1 && d <= t.days);
+  days.forEach((d) => kbBusy.add(d));
+  if (boardOn()) renderBoard();
+  kbQueue = kbQueue.then(async () => {
+    for (const d of days) {
+      try {
+        const b = await buildDayBundle(t, d, { quiet: true });
+        if (b.empty) t.dayPlans[d] = b.active.length ? emptyPlan(b) : null;
+        else {
+          const { order, manual } = chosenOrder(b);
+          const { plan, ptsOrder, legs } = planFromOrder(b, order, manual);
+          t.dayPlans[d] = plan;
+          fetchLines(t, plan, ptsOrder, legs, b.estimated);
+        }
+        if (t.curDay === d) t.plan = t.dayPlans[d];
+      } catch (e) {
+        console.warn(e);
+      }
+      kbBusy.delete(d);
+      save();
+      if (boardOn()) renderBoard();
+    }
+  });
+  return kbQueue;
+}
+
+const dropFromManual = (t, id) => Object.values(t.manualOrders || {}).forEach((arr) => arr.includes(id) && arr.splice(arr.indexOf(id), 1));
+
+// 放下：to = 第几天（0 = 备选），ids = 那一栏其他卡片的顺序，idx = 放在第几个
+function kbDrop(id, to, ids, idx) {
+  const t = T();
+  const p = t.places.find((x) => x.id === id);
+  if (!p) return;
+  const from = p.parked || !(p.day >= 1 && p.day <= t.days) ? 0 : p.day;
+  const order = [...ids];
+  order.splice(Math.min(idx, order.length), 0, id);
+  if (to === 0) {
+    if (from === 0) return;
+    dropFromManual(t, id);
+    Object.assign(p, { parked: true, day: null, dayLocked: false });
+    toast(`「${shortName(p)}」放进备选，先不排进路线`);
+    return kbRecompute([from]);
+  }
+  if (from === to) {
+    const cur = boardCols(t).find((c) => c.d === to).items.map((x) => x.id);
+    if (cur.join() === order.join()) return;
+    setManual(t, to, order);
+    toast(`第 ${to} 天：照你排的顺序，时间重新算`);
+    return kbRecompute([to]);
+  }
+  dropFromManual(t, id);
+  Object.assign(p, { parked: false, day: to, dayLocked: true });
+  if (kbMode() === 'keep') setManual(t, to, order);
+  else setManual(t, to, null);
+  buzz(15);
+  toast(kbMode() === 'keep' ? `移到第 ${to} 天，照你放的位置` : `移到第 ${to} 天，那天重新排成最顺`, 3000);
+  return kbRecompute([from, to]);
+}
+
+(function boardDrag() {
+  const board = $('#kbBoard');
+  let d = null;
+  const clearMarks = () => {
+    board.querySelector('.kb-line')?.remove();
+    board.querySelectorAll('.kb-over').forEach((c) => c.classList.remove('kb-over'));
+  };
+  board.addEventListener('pointerdown', (e) => {
+    const g = e.target.closest('.kb-grip');
+    if (!g) return;
+    e.preventDefault();
+    const card = g.closest('.kb-card');
+    const r = card.getBoundingClientRect();
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('kb-ghost');
+    Object.assign(ghost.style, { width: `${r.width}px`, left: `${r.left}px`, top: `${r.top}px` });
+    $('#boardWrap').appendChild(ghost);
+    card.classList.add('kb-placeholder');
+    d = { id: card.dataset.id, card, ghost, dx: e.clientX - r.left, dy: e.clientY - r.top, target: null, key: '' };
+    try {
+      g.setPointerCapture(e.pointerId);
+    } catch {}
+    buzz();
+  });
+  board.addEventListener('pointermove', (e) => {
+    if (!d) return;
+    d.ghost.style.left = `${e.clientX - d.dx}px`;
+    d.ghost.style.top = `${e.clientY - d.dy}px`;
+    // 拖到边边：看板自己左右滑、那一栏自己上下滑
+    const br = board.getBoundingClientRect();
+    if (e.clientX < br.left + 36) board.scrollLeft -= 14;
+    else if (e.clientX > br.right - 36) board.scrollLeft += 14;
+    const col = document.elementFromPoint(e.clientX, e.clientY)?.closest('.kb-col');
+    clearMarks();
+    if (!col) {
+      d.target = null;
+      return;
+    }
+    col.classList.add('kb-over');
+    const list = col.querySelector('.kb-list');
+    const lr = list.getBoundingClientRect();
+    if (e.clientY < lr.top + 30) list.scrollTop -= 10;
+    else if (e.clientY > lr.bottom - 30) list.scrollTop += 10;
+    const cards = [...list.querySelectorAll('.kb-card:not(.kb-placeholder)')];
+    let idx = cards.findIndex((c) => {
+      const rr = c.getBoundingClientRect();
+      return e.clientY < rr.top + rr.height / 2;
+    });
+    if (idx < 0) idx = cards.length;
+    const line = document.createElement('div');
+    line.className = 'kb-line';
+    if (idx < cards.length) list.insertBefore(line, cards[idx]);
+    else list.appendChild(line);
+    const key = `${col.dataset.day}:${idx}`;
+    if (key !== d.key) {
+      d.key = key;
+      buzz(5);
+    }
+    d.target = { day: Number(col.dataset.day), ids: cards.map((c) => c.dataset.id), idx };
+  });
+  const end = () => {
+    if (!d) return;
+    const { id, card, ghost, target } = d;
+    d = null;
+    ghost.remove();
+    card.classList.remove('kb-placeholder');
+    clearMarks();
+    if (target) kbDrop(id, target.day, target.ids, target.idx);
+  };
+  board.addEventListener('pointerup', end);
+  board.addEventListener('pointercancel', end);
+})();
+
+// 点卡片：移到哪天、固定时间、固定这天、看介绍（不想拖的人用这个）
+let kbActId = null;
+function openKbActions(p) {
+  const t = T();
+  kbActId = p.id;
+  const days = Array.from({ length: t.days }, (_, i) => i + 1);
+  $('#kbActTitle').textContent = p.name;
+  $('#kbActBody').innerHTML =
+    days.map((d) => `<button type="button" data-kbmove="${d}" class="${p.day === d && !p.parked ? 'on' : ''}"><span style="background:${dayColor(d)};color:#fff">${d}</span><div><b>${p.day === d && !p.parked ? `现在在第 ${d} 天` : `移到第 ${d} 天`}</b><span>${esc(fmtDay(t, d))}</span></div></button>`).join('') +
+    `<button type="button" data-kbmove="0" class="${p.parked ? 'on' : ''}"><span>${ic('x', 18)}</span><div><b>${p.parked ? '现在在备选' : '放进备选（先不去）'}</b><span>不排进路线，之后想去再拖回来</span></div></button>` +
+    `<button type="button" data-kbact="time"><span>${ic('clock', 18)}</span><div><b>${p.fixedTime ? `固定时间：${esc(p.fixedTime)}（改）` : '固定几点去…'}</b><span>想在某个时间段去就设这个，其他地点排在前后</span></div></button>` +
+    (p.day && !p.parked
+      ? `<button type="button" data-kbact="${p.dayLocked ? 'unlock' : 'lock'}"><span>${ic('lock', 18)}</span><div><b>${p.dayLocked ? '取消「固定这天」' : '固定在这天'}</b><span>${p.dayLocked ? '「全部重新分配」时可以被移到别天' : '「全部重新分配」时不会被移走'}</span></div></button>`
+      : '') +
+    `<button type="button" data-kbact="info"><span>${ic('info', 18)}</span><div><b>看介绍</b><span>照片、营业时间、位置</span></div></button>`;
+  $('#kbActDialog').showModal();
+}
+$('#kbBoard').addEventListener('click', (e) => {
+  const auto = e.target.closest('[data-auto]');
+  if (auto) {
+    setManual(T(), Number(auto.dataset.auto), null);
+    toast(`第 ${auto.dataset.auto} 天改回最顺的顺序`);
+    kbRecompute([Number(auto.dataset.auto)]);
+    return;
+  }
+  const card = e.target.closest('.kb-card');
+  if (!card || e.target.closest('.kb-grip')) return;
+  const p = T().places.find((x) => x.id === card.dataset.id);
+  if (p) openKbActions(p);
+});
+$('#kbActBody').addEventListener('click', (e) => {
+  const t = T();
+  const p = t.places.find((x) => x.id === kbActId);
+  const b = e.target.closest('button');
+  if (!p || !b) return;
+  $('#kbActDialog').close();
+  if (b.dataset.kbmove != null) {
+    const to = Number(b.dataset.kbmove);
+    const col = boardCols(t).find((c) => c.d === to);
+    const ids = col.items.map((x) => x.id).filter((x) => x !== p.id);
+    return kbDrop(p.id, to, ids, ids.length);
+  }
+  const act = b.dataset.kbact;
+  if (act === 'time') return openTimeDialog(p);
+  if (act === 'info') return openDetails(p, { inTrip: true });
+  if (act === 'lock' || act === 'unlock') {
+    p.dayLocked = act === 'lock';
+    save();
+    renderBoard();
+    toast(p.dayLocked ? `「${shortName(p)}」固定在第 ${p.day} 天` : '已取消固定，重新分配时可以移动');
+  }
+});
+$('#kbActCancel').addEventListener('click', () => $('#kbActDialog').close());
+$('#boardWrap').addEventListener('change', (e) => {
+  if (e.target.name !== 'kbMode') return;
+  state.boardMode = e.target.value;
+  save();
+  toast(e.target.value === 'keep' ? '拖到别天：照你放的位置' : '拖到别天：那天自动排成最顺');
+});
+$('#kbRearrange').addEventListener('click', async () => {
+  const t = T();
+  if (!confirm('按地区重新分配全部地点到每一天？\n「固定这天」和「固定时间」的地点不会动，备选的也不会排进去。')) return;
+  $('#kbRearrange').disabled = true;
+  try {
+    await arrangeTrip(t);
+    await kbRecompute(Array.from({ length: t.days }, (_, i) => i + 1));
+    toast('已重新分配每一天');
+  } finally {
+    $('#kbRearrange').disabled = false;
+  }
+});
+$('#btnBoard').addEventListener('click', openBoard);
+
+/* ================= 行程里的 4 个分页：地图 / 每天 / 地点 / 更多 ================= */
+
+let tab = 'map';
+let daysMode = 'list'; // 「每天」分页：list = 列表，board = 看板
+let nextFocus = null; // 地图上点了哪个地点（下一站卡片改显示它）
+
+// 打开行程先看哪一页：当天在玩 → 地图；还在规划 → 每天；还没地点 → 地点
+function defaultTab(t) {
+  if (!t?.places.some(isLive)) return 'places';
+  if (isMulti(t)) return todayDay(t) ? 'map' : 'days';
+  return t.startDate === todayStr() ? 'map' : 'days';
+}
+
+function setTab(name) {
+  const t = T();
+  if (tour && name !== 'map') stopTour();
+  if (reorderMode && name !== 'days') setReorderMode(false);
+  tab = name;
+  state.tripTab = name;
+  state.tripTabFor = t?.id;
+  save();
+  $('#viewMap').dataset.tab = name;
+  $('#sheet').hidden = name !== 'days';
+  $('#pagePlaces').hidden = name !== 'places';
+  $('#pageMore').hidden = name !== 'more';
+  document.querySelectorAll('#tripTabs [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+  if (name === 'places') renderPlaces();
+  if (name === 'more') renderMore();
+  if (name === 'days') renderMap();
+  if (name === 'map') {
+    renderNextCard();
+    requestAnimationFrame(() => map?.resize());
+  }
+}
+$('#tripTabs').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-tab]');
+  if (!b || b.dataset.tab === tab) return;
+  setTab(b.dataset.tab);
+});
+
+/* ---- 「每天」分页：列表 / 看板 ---- */
+
+const boardOn = () => currentView === 'map' && tab === 'days' && daysMode === 'board';
+function setDaysMode(m) {
+  daysMode = m;
+  document.querySelectorAll('input[name="daysMode"]').forEach((r) => (r.checked = r.value === m));
+  $('#boardWrap').hidden = m !== 'board';
+  $('#list').hidden = m === 'board';
+  document.querySelector('#sheetHead .sh-row').hidden = m === 'board';
+  $('#status').hidden = m === 'board';
+  if (m === 'board') {
+    renderBoard();
+    const t = T();
+    // 还没算的天先算好
+    const need = Array.from({ length: t.days }, (_, i) => i + 1).filter((d) => !t.dayPlans?.[d] && t.places.some((p) => isLive(p) && p.day === d));
+    if (need.length) kbRecompute(need);
+  } else if (currentView === 'map') {
+    const t = T();
+    if (t?.curDay) t.plan = t.dayPlans?.[t.curDay] || null;
+    renderMap();
+    drawRoute();
+  }
+}
+$('#daysMode').addEventListener('change', (e) => {
+  if (e.target.name === 'daysMode') setDaysMode(e.target.value);
+});
+
+function openBoard() {
+  const t = T();
+  if (!isMulti(t)) return toast('只有一天：用「每天」里的「调整顺序」就可以；要分几天，先在「修改行程」加天数');
+  if (tab !== 'days') setTab('days');
+  if (t.curDay) switchDay(0);
+  setDaysMode('board');
+}
+
+/* ---- 「地图」分页：下一站卡片 ---- */
+
+function legShort(l) {
+  if (!l) return '';
+  if (l.parts) return `停车 + 走路，共 ${fmtDur(l.dur)}`;
+  const k = legKind(l);
+  return `${MODE_NAME[k] || '前往'} ${fmtDur(l.dur)}${l.dist ? ` · ${fmtDist(l.dist)}` : ''}`;
+}
+
+function renderNextCard() {
+  const el = $('#nextCard');
+  const t = T();
+  if (!t || currentView !== 'map') return;
+  const multi = isMulti(t);
+  const chips = multi
+    ? `<div class="nc-days">${[0, ...Array.from({ length: t.days }, (_, i) => i + 1)]
+      .map((d) => `<button type="button" data-ncday="${d}" class="${(t.curDay || 0) === d ? 'on' : ''}" style="--dc:${d ? dayColor(d) : '#64748b'}">${d ? `<i></i>第${d}天` : '总览'}</button>`)
+      .join('')}</div>`
+    : '';
+  const live = t.places.filter(isLive);
+  let body = '';
+  let thumb = null;
+  // 在地图上点了某个地点：显示那个地点
+  const focus = nextFocus && t.places.find((p) => p.id === nextFocus);
+  if (!live.length) {
+    body = `<div class="nc-main"><div class="nc-name">还没有要去的地方</div><div class="nc-sub">加几个地点，就会帮你排出最顺的路线</div></div>
+      <div class="nc-acts"><button type="button" class="primary" data-nc="add">${ic('plus', 15)} 加地点</button></div>`;
+  } else if (focus && (!multi || !t.curDay || focus.day === t.curDay)) {
+    const plan = multi ? t.dayPlans?.[focus.day] : t.plan;
+    const st = plan?.stops.find((x) => x.id === focus.id);
+    const n = plan ? plan.order.filter((id) => t.places.find((x) => x.id === id && !x.done)).indexOf(focus.id) + 1 : 0;
+    thumb = focus;
+    body = `<div class="nc-row"><div class="si-thumb sm" data-prev="0">${kindIcon(focus.kind)}</div><div class="nc-main">
+        <div class="nc-k">${multi && focus.day ? `第 ${focus.day} 天 · ` : ''}${n > 0 ? `第 ${n} 站` : focus.done ? '已去过' : ''}${st ? ` · ${fmtClock(st.start)}–${fmtClock(st.depart)}` : ''}</div>
+        <div class="nc-name">${esc(focus.name)}</div></div></div>
+      <div class="nc-acts"><button type="button" class="primary" data-nc="nav" data-id="${focus.id}">${ic('nav', 15)} 导航</button><button type="button" data-nc="info" data-id="${focus.id}">${ic('info', 15)} 介绍</button>${multi && !t.curDay && focus.day ? `<button type="button" data-ncday="${focus.day}">看第 ${focus.day} 天 ›</button>` : `<button type="button" data-nc="list" data-id="${focus.id}">在列表里看 ›</button>`}</div>`;
+  } else if (multi && !t.curDay) {
+    const today = todayDay(t);
+    body = `<div class="nc-main"><div class="nc-k">${t.days} 天 · ${live.length} 个地点</div><div class="nc-name">点上面选一天，看那天的路线</div></div>
+      <div class="nc-acts">${today ? `<button type="button" class="primary" data-ncday="${today}">看今天（第 ${today} 天）</button>` : ''}<button type="button" data-nc="days">每天的安排 ›</button></div>`;
+  } else {
+    const info = stopInfoMap();
+    const plan = t.plan;
+    const ids = plan ? plan.order.filter((id) => info.has(id)) : [];
+    if (!ids.length) {
+      const left = live.filter((p) => !multi || p.day === t.curDay).length;
+      body = `<div class="nc-main"><div class="nc-name">${left ? '正在计算路线…' : '这天的地点都去过了 🎉'}</div></div>`;
+    } else {
+      const id = ids[0];
+      const p = t.places.find((x) => x.id === id);
+      const i = info.get(id);
+      const st = i.st;
+      thumb = p;
+      body = `<div class="nc-row"><div class="si-thumb sm" data-prev="0">${kindIcon(p.kind)}</div><div class="nc-main">
+          <div class="nc-k">下一站 · 第 ${i.num}/${ids.length} 站 · ${fmtClock(st.start)}${st.flag === 'closed' ? ' · <span class="nc-bad">到的时候已关门</span>' : ''}</div>
+          <div class="nc-name">${esc(p.name)}</div>
+          ${i.legIn ? `<div class="nc-sub">${modeIcon(legKind(i.legIn) || 'car', 13)} ${esc(legShort(i.legIn))}</div>` : ''}</div></div>
+        <div class="nc-acts"><button type="button" class="primary" data-nc="nav" data-id="${id}">${ic('nav', 15)} 导航</button><button type="button" data-nc="done" data-id="${id}">${ic('check', 15)} 去过了</button><button type="button" data-nc="days">全部 ${ids.length} 站 ›</button></div>`;
+    }
+  }
+  el.innerHTML = chips + `<div class="nc-body">${body}</div>`;
+  if (thumb) hydrateThumbs(el, [thumb]);
+  el.querySelector('.nc-days .on')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  requestAnimationFrame(() => document.documentElement.style.setProperty('--next-h', `${el.offsetHeight}px`));
+}
+
+$('#nextCard').addEventListener('click', (e) => {
+  const t = T();
+  const day = e.target.closest('[data-ncday]');
+  if (day) {
+    nextFocus = null;
+    return switchDay(Number(day.dataset.ncday));
+  }
+  const b = e.target.closest('[data-nc]');
+  if (!b) {
+    if (e.target.closest('[data-prev]')) {
+      const p = t.places.find((x) => x.id === (nextFocus || stopInfoMap().keys().next().value));
+      if (p) openDetails(p, { inTrip: true });
+    }
+    return;
+  }
+  const p = b.dataset.id && t.places.find((x) => x.id === b.dataset.id);
+  const act = b.dataset.nc;
+  if (act === 'add') return $('#btnAdd').click();
+  if (act === 'days') return setTab('days');
+  if (act === 'nav' && p) return openNav(p);
+  if (act === 'info' && p) return openDetails(p, { inTrip: true });
+  if (act === 'done' && p) return markDone(p.id, true);
+  if (act === 'list' && p) {
+    setTab('days');
+    return setTimeout(() => focusPlace(p.id), 50);
+  }
+});
+
+/* ---- 「地点」分页：全部地点按天分组 ---- */
+
+function renderPlaces() {
+  const t = T();
+  if (!t || currentView !== 'map') return;
+  const items = [];
+  const row = (p, plan, extra = '') => {
+    const st = plan?.stops.find((x) => x.id === p.id);
+    const sub = [
+      st && st.flag !== 'closed' ? `${fmtClock(st.start)}–${fmtClock(st.depart)}` : st ? '到的时候已关门' : null,
+      `停留 ${fmtDur((Number(p.stayMin) || 0) * 60e3)}`,
+      p.fixedTime ? (p.checkin ? `${p.fixedTime} 起入住` : `固定 ${p.fixedTime}`) : null,
+    ].filter(Boolean).join(' · ');
+    items.push(p);
+    return `<div class="pl-row${p.done ? ' done' : ''}" data-id="${p.id}">
+      <div class="si-thumb sm" data-prev="${items.length - 1}">${kindIcon(p.kind)}</div>
+      <div class="pl-main" data-pl="info"><div class="pl-name">${esc(p.name)}</div><div class="pl-sub">${esc(sub)}</div></div>
+      ${extra}
+      <button type="button" class="icon-btn sm" data-pl="edit" aria-label="编辑">${ic('edit', 16)}</button>
+      <button type="button" class="icon-btn sm" data-pl="del" aria-label="删除">${ic('x', 16)}</button>
+    </div>`;
+  };
+  const ordered = (ps, plan) => {
+    const ids = plan?.order || [];
+    return [...ps].sort((a, b) => (ids.includes(a.id) ? ids.indexOf(a.id) : 999) - (ids.includes(b.id) ? ids.indexOf(b.id) : 999));
+  };
+  let html = '';
+  if (isMulti(t)) {
+    for (let d = 1; d <= t.days; d++) {
+      const plan = t.dayPlans?.[d];
+      const ps = ordered(t.places.filter((p) => isLive(p) && p.day === d), plan);
+      html += `<div class="pl-h" style="--dc:${dayColor(d)}"><i></i><b>第 ${d} 天</b><span>${esc(fmtDay(t, d))} · ${ps.length} 个</span><button type="button" class="link" data-plday="${d}">看路线 ›</button></div>`;
+      html += ps.length ? ps.map((p) => row(p, plan)).join('') : '<div class="pl-empty">这天还没有地点</div>';
+    }
+    const un = t.places.filter((p) => isLive(p) && !(p.day >= 1 && p.day <= t.days));
+    if (un.length) html += `<div class="pl-h" style="--dc:#94a3b8"><i></i><b>还没分配</b><span>${un.length} 个 · 重新计算时会分到某一天</span></div>${un.map((p) => row(p, null)).join('')}`;
+  } else {
+    const ps = ordered(t.places.filter(isLive), t.plan);
+    html += `<div class="pl-h" style="--dc:#2563eb"><i></i><b>要去的地方</b><span>${ps.length} 个 · 照路线顺序</span></div>`;
+    html += ps.map((p) => row(p, t.plan)).join('') || '<div class="pl-empty">还没有地点，按右上角「加地点」</div>';
+  }
+  const parked = t.places.filter((p) => !p.done && p.parked);
+  if (parked.length) {
+    html += `<div class="pl-h" style="--dc:#cbd5e1"><i></i><b>备选 · 先不去</b><span>${parked.length} 个 · 不排进路线</span></div>`;
+    html += parked.map((p) => row(p, null, '<button type="button" class="pl-back" data-pl="unpark">拿回来</button>')).join('');
+  }
+  const done = t.places.filter((p) => p.done);
+  if (done.length) {
+    html += `<div class="pl-h" style="--dc:#a1a1aa"><i></i><b>已去过</b><span>${done.length} 个</span></div>`;
+    html += done.map((p) => row(p, null, '<button type="button" class="pl-back" data-pl="undo">恢复</button>')).join('');
+  }
+  $('#plList').innerHTML = html;
+  $('#plCount').textContent = `${t.places.filter(isLive).length} 个要去`;
+  hydrateThumbs($('#plList'), items);
+}
+
+$('#plList').addEventListener('click', (e) => {
+  const t = T();
+  const dayBtn = e.target.closest('[data-plday]');
+  if (dayBtn) {
+    setTab('map');
+    return switchDay(Number(dayBtn.dataset.plday));
+  }
+  const rowEl = e.target.closest('.pl-row');
+  if (!rowEl) return;
+  const p = t.places.find((x) => x.id === rowEl.dataset.id);
+  if (!p) return;
+  const act = e.target.closest('[data-pl]')?.dataset.pl || (e.target.closest('[data-prev]') ? 'info' : null);
+  if (act === 'info') openDetails(p, { inTrip: true });
+  else if (act === 'edit') openPlaceDialog(p.id);
+  else if (act === 'del') removePlace(p.id);
+  else if (act === 'undo') markDone(p.id, false);
+  else if (act === 'unpark') {
+    p.parked = false;
+    if (isMulti(t)) {
+      p.day = guessDay({ ...t, curDay: 0 }, p);
+      kbRecompute([p.day]);
+    } else scheduleReplan(100);
+    save();
+    renderPlaces();
+    toast(`「${shortName(p)}」拿回来了${isMulti(t) ? `，放在第 ${p.day} 天` : ''}`);
+  }
+});
+$('#plAdd').addEventListener('click', () => $('#btnAdd').click());
+$('#plBulk').addEventListener('click', () => openBulk(() => {
+  renderMap();
+  scheduleReplan(100);
+}));
+
+/* ---- 「更多」分页 ---- */
+
+function renderMore() {
+  const t = T();
+  if (!t) return;
+  const multi = isMulti(t);
+  $('#btnArrange').hidden = !multi;
+  $('#btnBoard').hidden = !multi;
+  const hs = allHotels(t);
+  $('#moreHead').innerHTML = `<div class="mh-name">${esc(t.name)}</div>
+    <div class="mh-sub">${multi ? `${esc(fmtDay(t, 1))} – ${esc(fmtDay(t, t.days))} · ${t.days} 天` : esc(fmtDay(t, 1))} · ${t.places.filter(isLive).length} 个地点</div>
+    ${hs.length ? `<div class="mh-sub">${ic('bed', 13)} ${hs.map((h) => esc(h.name)).join(' → ')}</div>` : ''}`;
+}
+
+/* ================= 返回：一层一层退（手机的返回键 / 返回手势也一样） ================= */
+//
+// 浏览器的「上一页」只装一格：我们自己决定退到哪里（关窗口 → 回列表 → 回第一个分页 → 回首页），
+// 还没到首页就再装一格。到了首页就不装，再按一次返回才是真的离开。
+
+let backArmed = false;
+let ignorePop = false;
+const dlgStack = [];
+function armBack() {
+  if (backArmed) return;
+  try {
+    history.pushState({ shunlu: 1 }, '');
+    backArmed = true;
+  } catch {}
+}
+function disarmBack() {
+  if (!backArmed) return;
+  backArmed = false;
+  ignorePop = true;
+  history.back();
+}
+const _showModal = HTMLDialogElement.prototype.showModal;
+HTMLDialogElement.prototype.showModal = function showModal(...args) {
+  armBack();
+  dlgStack.push(this);
+  this.addEventListener('close', () => {
+    const i = dlgStack.lastIndexOf(this);
+    if (i >= 0) dlgStack.splice(i, 1);
+    if (currentView === 'trips' && !dlgStack.length) disarmBack();
+  }, { once: true });
+  return _showModal.apply(this, args);
+};
+
+function goBack() {
+  const top = [...dlgStack].reverse().find((d) => d.open);
+  if (top) {
+    top.close();
+    return;
+  }
+  if (tour) return stopTour();
+  if (currentView === 'map') {
+    const t = T();
+    if (reorderMode) return setReorderMode(false);
+    if (tab === 'days' && daysMode === 'board') return setDaysMode('list');
+    if (tab === 'days' && isMulti(t) && t.curDay) return switchDay(0);
+    if (nextFocus && tab === 'map') {
+      nextFocus = null;
+      highlightMarker(null);
+      return renderNextCard();
+    }
+    const start = defaultTab(t);
+    if (tab !== start) return setTab(start);
+    return showView('trips');
+  }
+  if (currentView === 'setup') {
+    if (setupStep > 1 && !setupEdit) return $('#setupPrev').click();
+    return $('#setupBack').click();
+  }
+}
+
+window.addEventListener('popstate', () => {
+  if (ignorePop) {
+    ignorePop = false;
+    return;
+  }
+  backArmed = false;
+  goBack();
+  if (currentView !== 'trips' || dlgStack.length) armBack();
+});
 
 /* ================= 编辑地点 ================= */
 
@@ -5825,68 +6496,13 @@ $('#btnAI').addEventListener('click', async () => {
 
 /* ================= 底部面板拖动 ================= */
 
-const SHEET = { min: 132, peek: 0.38, full: 0.88 };
-function sheetPx(st) {
-  return st === 'min' ? SHEET.min : Math.round(window.innerHeight * SHEET[st]);
-}
+// 「每天」现在是一整页（不用拖高拖低）；保留这个函数给旧的呼叫用
 function setSheet(st) {
   $('#sheet').dataset.state = st;
-  document.documentElement.style.setProperty('--sheet-h', `${sheetPx(st)}px`);
 }
-setSheet('peek');
-window.addEventListener('resize', () => setSheet($('#sheet').dataset.state));
-
-(function sheetDrag() {
-  const sheet = $('#sheet');
-  let startY = 0;
-  let startH = 0;
-  let moved = false;
-  const onDown = (e) => {
-    if (e.target.closest('button')) return;
-    startY = e.clientY;
-    startH = sheet.getBoundingClientRect().height;
-    moved = false;
-    sheet.classList.add('dragging');
-    sheet.setPointerCapture(e.pointerId);
-    sheet.addEventListener('pointermove', onMove);
-    sheet.addEventListener('pointerup', onUp, { once: true });
-    sheet.addEventListener('pointercancel', onUp, { once: true });
-  };
-  const onMove = (e) => {
-    const dy = startY - e.clientY;
-    if (Math.abs(dy) > 5) moved = true;
-    const h = Math.min(window.innerHeight * 0.92, Math.max(SHEET.min, startH + dy));
-    document.documentElement.style.setProperty('--sheet-h', `${h}px`);
-  };
-  const onUp = (e) => {
-    sheet.removeEventListener('pointermove', onMove);
-    sheet.classList.remove('dragging');
-    const cur = sheet.dataset.state;
-    if (!moved) {
-      if (e.target.closest('#sheetGrip')) setSheet(cur === 'full' ? 'peek' : 'full');
-      else setSheet(cur);
-      return;
-    }
-    const h = sheet.getBoundingClientRect().height;
-    const best = ['min', 'peek', 'full'].reduce((a, b) => (Math.abs(sheetPx(b) - h) < Math.abs(sheetPx(a) - h) ? b : a));
-    setSheet(best);
-  };
-  $('#sheetGrip').addEventListener('pointerdown', onDown);
-  $('#sheetHead').addEventListener('pointerdown', onDown);
-})();
 
 /* ================= 按钮与自动更新 ================= */
 
-// 「⋯」菜单：按了任何一项就关掉
-$('#btnMenu').addEventListener('click', () => {
-  const t = T();
-  $('#btnArrange').hidden = !isMulti(t);
-  $('#btnReorder').hidden = isMulti(t) && !t.curDay;
-  $('#menuDialog').showModal();
-});
-$('#menuDialog').addEventListener('click', (e) => {
-  if (e.target.closest('button') || e.target === $('#menuDialog')) $('#menuDialog').close();
-});
 $('#btnReplan').addEventListener('click', async () => {
   const t = T();
   if (isMulti(t) && !t.curDay) {
@@ -5911,11 +6527,7 @@ $('#btnArrange').addEventListener('click', async () => {
   toast('已重新分配每一天的地点');
   replan();
 });
-$('#mapBack').addEventListener('click', () => {
-  if (reorderMode) setReorderMode(false);
-  if (tour) stopTour();
-  showView('trips');
-});
+$('#mapBack').addEventListener('click', goBack);
 $('#btnFit').addEventListener('click', fitAll);
 
 // 每次回到 App：超过 5 分钟就按现在的位置和时间重新算

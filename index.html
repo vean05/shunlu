@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- 所有文件都放在同一层（没有文件夹），上传 GitHub 比较方便。改了 style.css / app.js 就把 v= 加一，手机才会拿到新版 -->
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
 
@@ -230,9 +230,9 @@
   <section id="viewMap" class="view" hidden>
     <div id="map"></div>
     <header id="mapTop">
-      <button id="mapBack" class="icon-btn" aria-label="回首页"><span data-ic="back"></span></button>
+      <button id="mapBack" class="icon-btn" aria-label="返回"><span data-ic="back"></span></button>
       <div class="mt-title"><div id="tripTitle"></div><div id="tripSub"></div></div>
-      <button id="btnMenu" class="icon-btn" aria-label="更多功能"><span data-ic="more"></span></button>
+      <span class="icon-btn"></span>
     </header>
     <div id="mapLegend" hidden></div>
     <div id="followHud" hidden>
@@ -260,18 +260,26 @@
       <button id="btnFit" class="fab" title="看全部路线" aria-label="看全部路线"><span data-ic="fit"></span></button>
       <button id="btnAdd" class="fab-add" aria-label="加地点"><span data-ic="plus"></span><span>地点</span></button>
     </div>
-    <section id="sheet" data-state="peek">
-      <div id="sheetGrip"><span></span></div>
+    <!-- 地图分页：下一站卡片 -->
+    <div id="nextCard"></div>
+
+    <!-- 每天分页：每天的安排（列表 / 看板）、点一天看时间线 -->
+    <section id="sheet" class="tpage" data-state="full" hidden>
       <div id="sheetHead">
+        <div id="daysMode" class="seg days-mode" hidden>
+          <label><input type="radio" name="daysMode" value="list"><span>列表</span></label>
+          <label><input type="radio" name="daysMode" value="board"><span>看板 · 拖动调整</span></label>
+        </div>
         <div class="sh-row">
           <div id="summary"></div>
+          <button id="btnReorder" class="icon-btn sm" title="调整顺序" aria-label="调整顺序"><span data-ic="reorder"></span></button>
           <button id="btnPreview" class="icon-btn sm" title="预览路线" aria-label="预览路线"><span data-ic="play"></span></button>
           <button id="btnReplan" class="icon-btn sm" title="重新计算" aria-label="重新计算"><span data-ic="refresh"></span></button>
         </div>
         <div id="status"></div>
         <div id="dayTabs" class="day-tabs" hidden></div>
         <div id="reorderBar" hidden>
-          <div class="small">按住 <span data-ic="grip"></span> 拖到想要的位置，时间会马上重算</div>
+          <div class="small">按住「拖动」把地点拖到想要的位置。要换到别天：用上面的「看板」</div>
           <div class="rb-btns">
             <button id="btnAutoOrder">恢复最优顺序</button>
             <button id="btnReorderDone" class="primary">完成</button>
@@ -279,27 +287,67 @@
         </div>
       </div>
       <div id="list"></div>
+      <div id="boardWrap" hidden>
+        <div class="kb-top">
+          <div class="seg kb-mode">
+            <label><input type="radio" name="kbMode" value="auto"><span>换到别天后：自动排最顺</span></label>
+            <label><input type="radio" name="kbMode" value="keep"><span>照我放的位置</span></label>
+          </div>
+          <div class="small muted">按住 <span data-ic="grip"></span> 拖到别天或上下移动；点卡片可以「移到第几天」「固定几点去」。</div>
+        </div>
+        <div id="kbBoard" class="kb-board"></div>
+        <div class="kb-foot"><button type="button" id="kbRearrange">全部重新分配（固定的不动）</button></div>
+      </div>
     </section>
+
+    <!-- 地点分页：全部地点按天分组 -->
+    <section id="pagePlaces" class="tpage" hidden>
+      <div class="pg-head">
+        <div class="pg-title"><b>地点</b><span id="plCount"></span></div>
+        <button type="button" id="plBulk" class="link">一次贴上很多</button>
+        <button type="button" id="plAdd" class="primary"><span data-ic="plus"></span>加地点</button>
+      </div>
+      <div id="plList" class="pg-body"></div>
+    </section>
+
+    <!-- 更多分页 -->
+    <section id="pageMore" class="tpage" hidden>
+      <div class="pg-body">
+        <div id="moreHead" class="more-head"></div>
+        <div class="more-sec">行程</div>
+        <div class="menu-list more-list">
+          <button id="btnEdit"><span data-ic="edit"></span><div><b>修改行程</b><span>城市、日期、天数、出发时间</span></div></button>
+          <button id="btnStays"><span data-ic="bed"></span><div><b>住宿 / 换酒店</b><span>每晚住哪里、入住退房时间、住哪一区最顺</span></div></button>
+          <button id="btnBoard"><span data-ic="grip"></span><div><b>拖动调整每天的安排</b><span>看板：换到别天、调顺序、先不去</span></div></button>
+          <button id="btnArrange"><span data-ic="calendar"></span><div><b>重新分配每一天</b><span>按地区、休息日重新分（固定的不动）</span></div></button>
+        </div>
+        <div class="more-sec">出门用</div>
+        <div class="menu-list more-list">
+          <button id="btnFood"><span data-ic="utensils"></span><div><b>找附近吃的</b><span>按距离列出你附近的餐厅</span></div></button>
+          <button id="btnNavApp"><span data-ic="nav"></span><div><b>导航用哪个 App</b><span>Google Maps、Waze 或 Apple 地图</span></div></button>
+          <button id="btnOffline"><span data-ic="download"></span><div><b>离线地图</b><span>出国没网络也能看地图</span></div></button>
+        </div>
+        <div class="more-sec">分享和记录</div>
+        <div class="menu-list more-list">
+          <button id="btnShare"><span data-ic="share"></span><div><b>分享给朋友</b><span>传一个链接，朋友打开就有一样的行程</span></div></button>
+          <button id="btnPoster"><span data-ic="image"></span><div><b>生成行程图片</b><span>路线地图 + 每一站，传 WhatsApp、小红书、IG</span></div></button>
+          <button id="btnCalendar"><span data-ic="calendar"></span><div><b>加进手机日历</b><span>每一站变成日历活动，到时间会提醒（自己选要不要）</span></div></button>
+          <button id="btnBudget"><span data-ic="wallet"></span><div><b>花费 / 预算</b><span>门票估计、记录每天花了多少</span></div></button>
+          <button id="btnAI"><span data-ic="sparkles"></span><div><b>问 AI 建议</b><span>复制行程，贴到 ChatGPT / Gemini</span></div></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 底部分页 -->
+    <nav id="tripTabs">
+      <button type="button" data-tab="map"><span data-ic="map"></span>地图</button>
+      <button type="button" data-tab="days"><span data-ic="calendar"></span>每天</button>
+      <button type="button" data-tab="places"><span data-ic="pin"></span>地点</button>
+      <button type="button" data-tab="more"><span data-ic="more"></span>更多</button>
+    </nav>
+  </section>
   </section>
 
-  <!-- 更多功能 -->
-  <dialog id="menuDialog" class="action-sheet">
-    <div class="menu-list">
-      <button id="btnReorder"><span data-ic="reorder"></span><div><b>调整顺序</b><span>自己决定先去哪里，时间马上重算</span></div></button>
-      <button id="btnArrange"><span data-ic="calendar"></span><div><b>重新分配每一天</b><span>按地区、休息日重新分</span></div></button>
-      <button id="btnFood"><span data-ic="utensils"></span><div><b>找附近吃的</b><span>按距离列出你附近的餐厅</span></div></button>
-      <button id="btnStays"><span data-ic="bed"></span><div><b>住宿 / 换酒店</b><span>看住哪一区最顺</span></div></button>
-      <button id="btnEdit"><span data-ic="edit"></span><div><b>修改行程</b><span>地点、日期、出发时间</span></div></button>
-      <button id="btnBudget"><span data-ic="wallet"></span><div><b>花费 / 预算</b><span>门票估计、记录每天花了多少</span></div></button>
-      <button id="btnOffline"><span data-ic="download"></span><div><b>离线地图</b><span>出国没网络也能看地图</span></div></button>
-      <button id="btnNavApp"><span data-ic="nav"></span><div><b>导航用哪个 App</b><span>Google Maps、Waze 或 Apple 地图</span></div></button>
-      <button id="btnShare"><span data-ic="share"></span><div><b>分享给朋友</b><span>传一个链接，朋友打开就有一样的行程</span></div></button>
-      <button id="btnPoster"><span data-ic="image"></span><div><b>生成行程图片</b><span>路线地图 + 每一站，传 WhatsApp、小红书、IG</span></div></button>
-      <button id="btnCalendar"><span data-ic="calendar"></span><div><b>加进手机日历</b><span>每一站变成日历活动，到时间会提醒（自己选要不要）</span></div></button>
-      <button id="btnAI"><span data-ic="sparkles"></span><div><b>问 AI 建议</b><span>复制行程，贴到 ChatGPT / Gemini</span></div></button>
-    </div>
-    <button class="menu-cancel" id="menuCancel">取消</button>
-  </dialog>
 
   <!-- 在地图页加地点 -->
   <dialog id="addDialog" class="full">
@@ -496,6 +544,12 @@
     </div>
   </dialog>
 
+  <dialog id="kbActDialog" class="action-sheet">
+    <div class="kb-act-title" id="kbActTitle"></div>
+    <div id="kbActBody" class="menu-list"></div>
+    <button type="button" class="menu-cancel" id="kbActCancel">取消</button>
+  </dialog>
+
   <!-- 一次贴上很多地点 -->
   <dialog id="bulkDialog">
     <div class="pk-box">
@@ -529,6 +583,6 @@
   <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script type="module" src="app.js?v=18"></script>
+  <script type="module" src="app.js?v=20"></script>
 </body>
 </html>
