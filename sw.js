@@ -1,5 +1,5 @@
 // 离线缓存：App 本身的文件先用网络（保证拿到最新版），没网时用缓存
-const CACHE = 'shunlu-v12';
+const CACHE = 'shunlu-v15';
 // 地图（离线地图也存在这里），换版本时不要删
 const MAP_CACHE = 'shunlu-map';
 const SHELL = [

@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- 所有文件都放在同一层（没有文件夹），上传 GitHub 比较方便。改了 style.css / app.js 就把 v= 加一，手机才会拿到新版 -->
-  <link rel="stylesheet" href="style.css?v=12">
+  <link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 
@@ -201,12 +201,21 @@
       <button id="btnMenu" class="icon-btn" aria-label="更多功能"><span data-ic="more"></span></button>
     </header>
     <div id="mapLegend" hidden></div>
+    <div id="followHud" hidden>
+      <div class="fh-speed"><b id="fhSpeed">–</b><span>km/h</span></div>
+      <div id="fhText"></div>
+      <button type="button" id="fhStop" class="icon-btn sm" aria-label="停止跟随"><span data-ic="x"></span></button>
+    </div>
+    <div id="parkPrompt" hidden>
+      <span id="ppText"></span>
+      <div class="gp-btns"><button type="button" id="ppClose">知道了</button><button type="button" id="ppGo" class="primary">导航到停车场</button></div>
+    </div>
     <div id="geoPrompt" hidden>
       <span id="gpText"></span>
       <div class="gp-btns"><button type="button" id="gpNo">不是</button><button type="button" id="gpYes" class="primary">是，去过了</button></div>
     </div>
     <div id="fabs">
-      <button id="btnLocate" class="fab" title="我的位置" aria-label="我的位置"><span data-ic="locate"></span></button>
+      <button id="btnLocate" class="fab" title="跟着我走" aria-label="跟着我走"><span data-ic="locate"></span></button>
       <button id="btnFit" class="fab" title="看全部路线" aria-label="看全部路线"><span data-ic="fit"></span></button>
       <button id="btnAdd" class="fab-add" aria-label="加地点"><span data-ic="plus"></span><span>地点</span></button>
     </div>
@@ -241,6 +250,7 @@
       <button id="btnEdit"><span data-ic="edit"></span><div><b>修改行程</b><span>地点、日期、出发时间</span></div></button>
       <button id="btnBudget"><span data-ic="wallet"></span><div><b>花费 / 预算</b><span>门票估计、记录每天花了多少</span></div></button>
       <button id="btnOffline"><span data-ic="download"></span><div><b>离线地图</b><span>出国没网络也能看地图</span></div></button>
+      <button id="btnNavApp"><span data-ic="nav"></span><div><b>导航用哪个 App</b><span>Google Maps、Waze 或 Apple 地图</span></div></button>
       <button id="btnShare"><span data-ic="share"></span><div><b>分享给朋友</b><span>传一个链接，朋友打开就有一样的行程</span></div></button>
       <button id="btnAI"><span data-ic="sparkles"></span><div><b>问 AI 建议</b><span>复制行程，贴到 ChatGPT / Gemini</span></div></button>
     </div>
@@ -415,10 +425,20 @@
     </div>
   </dialog>
 
+  <!-- 选导航 App -->
+  <dialog id="navAppDialog">
+    <div class="pk-box">
+      <h3>导航用哪个 App？</h3>
+      <p class="small muted">按「导航」时会打开这个 App。之后可以在右上角 ⋯ 里改。</p>
+      <div id="naList" class="na-list"></div>
+      <div class="dialog-actions"><button type="button" id="naClose">取消</button></div>
+    </div>
+  </dialog>
+
   <div id="toast" hidden></div>
   <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script type="module" src="app.js?v=12"></script>
+  <script type="module" src="app.js?v=15"></script>
 </body>
 </html>

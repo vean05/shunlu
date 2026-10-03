@@ -1,7 +1,7 @@
 import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=11';
 import { optimize, evaluate } from './optimizer.js?v=11';
 import { arrangeDays } from './days.js?v=11';
-import { ic, modeIcon, drawModeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=11';
+import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=11';
 import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=11';
 import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails } from './discover.js?v=11';
 
@@ -1757,19 +1757,13 @@ function ensureMap() {
       paint: { 'line-color': ['coalesce', ['get', 'color'], ['get', 'tcolor'], '#7c3aed'], 'line-width': 5 },
     });
     // 路线上的小图标：开车 🚗、走路 🚶
-    ['car', 'foot', 'bus', 'train'].forEach((k) => map.addImage(`ic-${k}`, routeIcon(k), { pixelRatio: 2 }));
-    map.addLayer({
-      id: 'route-icons', type: 'symbol', source: 'route',
-      layout: {
-        'symbol-placement': 'line',
-        'symbol-spacing': 170,
-        'icon-image': ['match', ['get', 'icon'], 'foot', 'ic-foot', 'bus', 'ic-bus', 'train', 'ic-train', 'ic-car'],
-        'icon-rotation-alignment': 'viewport',
-        'icon-allow-overlap': false,
-        'icon-padding': 4,
-      },
-    });
     drawRoute();
+  });
+  map.on('dragstart', () => {
+    if (follow?.center) {
+      follow.center = false;
+      $('#btnLocate').classList.add('paused');
+    }
   });
   map.on('moveend', () => {
     const c = map.getCenter();
@@ -1779,14 +1773,6 @@ function ensureMap() {
 }
 
 // 画一个白底圆圈 + 彩色边框 + 图标，给地图用
-function routeIcon(name) {
-  const size = 76; // 实际显示 38px
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const g = c.getContext('2d');
-  drawModeIcon(g, name, size);
-  return g.getImageData(0, 0, size, size);
-}
 
 function drawRoute() {
   if (!mapReady) return;
@@ -1816,10 +1802,12 @@ function drawMarkers() {
   markers = [];
   const t = T();
   if (!t || !map) return;
-  const add = (lon, lat, cls, text, onClick) => {
+  const add = (lon, lat, cls, text, onClick, how = null) => {
     const el = document.createElement('div');
     el.className = `marker ${cls}`;
     el.textContent = text;
+    // 小图标：怎么到这里（开车 / 走路 / 巴士 / 地铁火车）
+    if (how) el.insertAdjacentHTML('beforeend', `<span class="mk-how" style="background:${MODE_COLOR[how]}">${modeIcon(how, 11)}</span>`);
     if (onClick) el.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
     markers.push(new maplibregl.Marker({ element: el }).setLngLat([lon, lat]).addTo(map));
   };
@@ -1848,7 +1836,7 @@ function drawMarkers() {
     if (isMulti(t) && p.day !== t.curDay) continue;
     const i = info.get(p.id);
     if (p.done) add(p.lon, p.lat, 'done', '✓', () => focusPlace(p.id));
-    else if (i) add(p.lon, p.lat, i.cls, String(i.num), () => focusPlace(p.id));
+    else if (i) add(p.lon, p.lat, i.cls, String(i.num), () => focusPlace(p.id), legKind(i.legIn));
     else if (t.plan?.closedIds?.includes(p.id)) add(p.lon, p.lat, 'bad', '✕', () => focusPlace(p.id));
     else add(p.lon, p.lat, 'pending', '?', () => focusPlace(p.id));
   }
@@ -1862,6 +1850,10 @@ function showMe(pos) {
     meMarker = new maplibregl.Marker({ element: el });
   }
   meMarker.setLngLat([pos.lon, pos.lat]).addTo(map);
+  const el = meMarker.getElement();
+  const hasDir = pos.heading != null && !Number.isNaN(pos.heading);
+  el.classList.toggle('dir', hasDir);
+  if (hasDir) el.style.setProperty('--hd', `${pos.heading}deg`);
 }
 
 function fitAll() {
@@ -2120,8 +2112,103 @@ async function buildTravel(t, pts, firstIsLive) {
     const dist = tables.foot?.distances[i]?.[j];
     return d == null || dist == null ? null : { mode: 'foot', dur: d * 1000, dist };
   };
-  return { leg, walk, estimated };
+  // 开车要多久（含停车时间），停车 + 步行圈用
+  const drive = (i, j) => {
+    if (i === j) return { mode: 'car', dur: 0, dist: 0 };
+    const d = tables.car?.durations[i]?.[j];
+    const dist = tables.car?.distances[i]?.[j];
+    if (d == null || dist == null) {
+      const m = haversine(pts[i], pts[j]) * 1.3;
+      return { mode: 'car', dur: (m / (30 / 3.6)) * 1000 + parkMs, dist: m, guessed: true };
+    }
+    return { mode: 'car', dur: d * 1000 + parkMs, dist };
+  };
+  return { leg, walk, drive, estimated };
 }
+
+/* ---- 停车 + 步行圈（「自动」模式）：记住车停在哪里 ---- */
+//
+// 走路到得了的地方分成一组，每组有一个停车点：
+//   开车到停车点 → 停车 → 走路逛完这组 → 走回停车点取车 → 开去下一组
+// 起点（酒店 / 现在的位置）也是一个停车点：酒店附近走路就到的地方，车根本不用开。
+// 这样「走回车子」的时间会算进路线，算法会自动把同一组排在一起。
+//
+// 返回 legAt(i, j)：pts 下标 i → j 的一段，可能由「走回停车处 + 开车 + 走过去」组成
+function parkWalkLegs({ pts, placeIdx, originIdx, endIdx, walk, drive, walkMax }) {
+  const near = (i, j) => {
+    const w = walk(i, j);
+    return w && w.dist <= walkMax ? w : null;
+  };
+  const entry = new Map(); // pts 下标 → 停车点下标
+  const left = new Set(placeIdx);
+  // 起点附近的地方：车停在起点
+  if (originIdx >= 0) {
+    entry.set(originIdx, originIdx);
+    for (const p of [...left]) {
+      if (near(originIdx, p) && near(p, originIdx)) {
+        entry.set(p, originIdx);
+        left.delete(p);
+      }
+    }
+  }
+  // 其他地方：挑「走路范围内邻居最多」的当停车点，邻居跟它一组
+  while (left.size) {
+    let best = null;
+    let bestN = -1;
+    for (const c of left) {
+      const nb = [...left].filter((p) => p !== c && near(c, p) && near(p, c)).length;
+      if (nb > bestN) {
+        bestN = nb;
+        best = c;
+      }
+    }
+    entry.set(best, best);
+    left.delete(best);
+    for (const p of [...left]) {
+      if (near(best, p) && near(p, best)) {
+        entry.set(p, best);
+        left.delete(p);
+      }
+    }
+  }
+  // 终点：跟起点是同一个地方（回酒店）就算同一个停车点；不然车要开到终点
+  if (endIdx >= 0) {
+    const same = originIdx >= 0 && haversine(pts[originIdx], pts[endIdx]) < 40;
+    entry.set(endIdx, same ? originIdx : endIdx);
+  }
+
+  const cache = new Map();
+  const walkLeg = (i, j) => walk(i, j) || { ...drive(i, j), mode: 'foot', guessed: true };
+  return function legAt(i, j) {
+    const key = i * 10000 + j;
+    if (cache.has(key)) return cache.get(key);
+    let r;
+    const ei = entry.get(i) ?? i;
+    const ej = entry.get(j) ?? j;
+    if (i === j) r = { mode: 'foot', dur: 0, dist: 0 };
+    else if (ei === ej) {
+      // 同一组：走路
+      r = walkLeg(i, j);
+    } else {
+      // 不同组：走回停车处 → 开车 → 从停车处走过去
+      // 同一个位置（例如停车点就是终点的酒店）不用走
+      const same = (a, b) => a === b || haversine(pts[a], pts[b]) < 40;
+      const parts = [];
+      if (!same(i, ei)) parts.push({ mode: 'foot', from: i, to: ei, ...walkLeg(i, ei) });
+      parts.push({ mode: 'car', from: ei, to: ej, ...drive(ei, ej) });
+      if (!same(ej, j)) parts.push({ mode: 'foot', from: ej, to: j, ...walkLeg(ej, j) });
+      r = {
+        mode: 'car',
+        dur: parts.reduce((a, x) => a + x.dur, 0),
+        dist: parts.reduce((a, x) => a + x.dist, 0),
+        parts: parts.length > 1 ? parts.map((x) => ({ mode: x.mode, from: x.from, to: x.to, dur: x.dur, dist: x.dist })) : null,
+      };
+    }
+    cache.set(key, r);
+    return r;
+  };
+}
+
 
 // 某天的营业时间窗口（绝对时间）
 function windowsFor(p, startTime) {
@@ -2183,7 +2270,19 @@ async function buildDayBundle(trip, day, { quiet = false } = {}) {
   remaining.forEach((p) => pts.push(p));
   if (end) pts.push(end);
   const endIdx = end ? pts.length - 1 : -1;
-  const { leg, walk, estimated } = await buildTravel(trip, pts, origin?.kind === 'gps');
+  const { leg: rawLeg, walk, drive, estimated } = await buildTravel(trip, pts, origin?.kind === 'gps');
+  // 自动模式：记住车停在哪里（走路逛完一组要走回车子）
+  const leg = s.mode === 'auto'
+    ? parkWalkLegs({
+      pts,
+      placeIdx: remaining.map((_, k) => placeBase + k),
+      originIdx: origin ? 0 : -1,
+      endIdx,
+      walk,
+      drive,
+      walkMax: Number(s.walkMaxM) || 0,
+    })
+    : rawLeg;
 
   // 节点编号 → pts 下标（没有起点时，0 号是虚拟起点）
   const n = remaining.length;
@@ -2276,7 +2375,9 @@ function planFromOrder(b, order, manual) {
   const legs = [];
   for (let i = 1; i < seq.length; i++) {
     const l = legOf(seq[i - 1], seq[i]);
-    legs.push(l ? { mode: l.mode, dur: l.dur, dist: l.dist, transit: l.transit || null, noTransit: !!l.noTransit, est: !!l.est } : null);
+    const pt = (k) => ({ name: b.pts[k].name || '', lat: b.pts[k].lat, lon: b.pts[k].lon });
+    const parts = l?.parts ? l.parts.map((x) => ({ mode: x.mode, dur: x.dur, dist: x.dist, from: pt(x.from), to: pt(x.to) })) : null;
+    legs.push(l ? { mode: l.mode, dur: l.dur, dist: l.dist, parts, transit: l.transit || null, noTransit: !!l.noTransit, est: !!l.est } : null);
   }
   const stops = res.stops.map((st) => ({
     id: remaining[st.k - 1].id,
@@ -2564,7 +2665,15 @@ $('#btnAutoOrder').addEventListener('click', () => {
 async function fetchLines(trip, plan, ptsOrder, legs, estimated) {
   const ls = legs.filter(Boolean);
   const runs = [];
+  const addRun = (mode, a, b) => {
+    if (runs.length && runs[runs.length - 1].mode === mode && !runs[runs.length - 1].coords) runs[runs.length - 1].pts.push(b);
+    else runs.push({ mode, pts: [a, b] });
+  };
   for (let i = 0; i < ls.length; i++) {
+    if (ls[i].parts) {
+      ls[i].parts.forEach((x) => addRun(x.mode, x.from, x.to));
+      continue;
+    }
     // 没找到公交（建议打车）的那段，照开车的路线画
     const mode = ls[i].mode === 'transit' && ls[i].noTransit ? 'car' : ls[i].mode;
     if (mode === 'transit') {
@@ -2636,6 +2745,13 @@ function hoursLine(p) {
   return `${dayLabel} ${txt}${extra}${h.source === 'manual' ? ' <span class="muted">（手动）</span>' : ''}`;
 }
 
+// 这一段主要是怎么去的（地图上的小图标用）
+function legKind(l) {
+  if (!l) return null;
+  if (l.mode === 'transit') return l.noTransit ? 'car' : transitKind(l.transit);
+  return l.mode === 'car' ? 'car' : 'foot';
+}
+
 // 一段公交主要是搭什么：坐最久的那一程是巴士就是 bus，地铁 / 电车 / 火车就是 train
 function transitKind(tr) {
   const rides = (tr?.legs || []).filter((x) => x.mode !== 'WALK');
@@ -2654,6 +2770,13 @@ function transitSteps(tr) {
     .join(' → ');
 }
 
+// 开车到这里、下一段是走路（或走回停车处）→ 车就停在这里
+function parkHere(legIn, nextId) {
+  if (!legIn || legIn.mode !== 'car' || legIn.parts?.at(-1)?.mode === 'foot') return false;
+  const next = nextId && stopInfoMap().get(nextId)?.legIn;
+  return !!next && (next.mode === 'foot' || next.parts?.[0]?.mode === 'foot');
+}
+
 function legHtml(l) {
   if (!l) return '';
   if (l.mode === 'transit') {
@@ -2665,6 +2788,17 @@ function legHtml(l) {
       : l.noTransit ? `这段没找到公交，打车大约 ${fmtDur(l.dur / 1.6)}` : '估计时间，正在查班次…';
     return `<div class="leg transit m-${kind}"><div class="tl-time"></div><div class="tl-rail"><i></i></div>
       <div class="leg-tr"><span class="leg-pill m-${kind}">${modeIcon(kind, 15)} ${label} ${fmtDur(l.dur)}${routes ? ` · ${esc(routes)}` : ''}</span><div class="leg-detail">${esc(detail)}</div></div></div>`;
+  }
+  if (l.parts) {
+    // 走回停车处 → 开车 → 走过去
+    const pill = (x, i) => {
+      const k = x.mode === 'car' ? 'car' : 'foot';
+      const txt = x.mode === 'car'
+        ? `开车 ${fmtDur(x.dur)} · ${fmtDist(x.dist)}${l.parts[i + 1] ? `，停在${x.to.name ? `「${x.to.name.split(' ')[0]}」` : ''}附近` : ''}`
+        : i === 0 ? `走回停车处${x.to.name ? `「${x.to.name.split(' ')[0]}」` : ''} ${fmtDur(x.dur)}` : `停好车走过去 ${fmtDur(x.dur)}`;
+      return `<span class="leg-pill m-${k}">${modeIcon(k, 15)} ${esc(txt)}</span>`;
+    };
+    return `<div class="leg car combo"><div class="tl-time"></div><div class="tl-rail"><i></i></div><div class="leg-tr leg-chain">${l.parts.map(pill).join('')}</div></div>`;
   }
   const k = l.mode === 'car' ? 'car' : 'foot';
   return `<div class="leg ${l.mode}"><div class="tl-time"></div><div class="tl-rail"><i></i></div><span class="leg-pill m-${k}">${modeIcon(k, 15)} ${MODE_NAME[k]} ${fmtDur(l.dur)} · ${fmtDist(l.dist)}</span></div>`;
@@ -2715,7 +2849,8 @@ function renderMap() {
   if (plan && plan.stops.length) {
     const rain = rainAdvice(t, isMulti(t) ? t.curDay : null, active);
     if (rain) html += `<div class="rain-note">${ic('rain', 16)} ${rain}</div>`;
-    html += `<button type="button" class="nav-all">${ic('route', 18)}<span>用 Google Maps 导航${isMulti(t) ? '这天' : ''}全程</span>${ic('chevron', 16)}</button>`;
+    const navName = NAV_APPS[state.navApp || 'google'];
+    html += `<button type="button" class="nav-all">${ic('route', 18)}<span>${state.navApp && state.navApp !== 'google' ? `用 ${navName} 导航到下一站` : `用 Google Maps 导航${isMulti(t) ? '这天' : ''}全程`}</span>${ic('chevron', 16)}</button>`;
     const o = plan.origin;
     html += `<div class="endpoint"><div class="tl-time"><b>${fmtClock(plan.startTime)}</b></div><div class="tl-rail"><div class="ep-dot">${ic(o?.kind === 'home' ? 'bed' : o?.kind === 'done' ? 'check' : 'pin', 15)}</div></div><div class="ep-text">${o ? esc(o.name) : '从第一站开始'}<span>出发</span></div></div>`;
   }
@@ -2738,12 +2873,13 @@ function renderMap() {
           <div class="si-thumb sm" data-prev="${planned.indexOf(id)}">${kindIcon(p.kind)}</div>
           <div class="body">
             <div class="name">${esc(p.name)}</div>
-            <div class="chips-row">${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}</div>
+            <div class="chips-row">${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}</div>
             <div class="hours">${hoursLine(p)}</div>
           </div>
         </div>
         ${note}
         ${p.note ? `<div class="memo">${ic('note', 13)} ${esc(p.note)}</div>` : ''}
+        ${legKind(i.legIn) === 'car' && visibleParkIds().has(id) ? `<div class="park-box" data-parkfor="${id}"><div class="pk-msg">正在找附近的停车场…</div></div>` : ''}
         <div class="acts">${reorderMode
           ? `<button class="mv" data-act="up" ${i.num === 1 ? 'disabled' : ''}>▲ 往前</button><button class="mv" data-act="down" ${i.num === planned.length ? 'disabled' : ''}>▼ 往后</button>`
           : `<button data-act="nav">${ic('nav', 15)} 导航</button><button data-act="info">${ic('info', 15)} 介绍</button><button data-act="done" class="done-btn">${ic('check', 15)} 去过了</button>`}
@@ -2785,6 +2921,8 @@ function renderMap() {
   }
   list.innerHTML = html;
   hydrateThumbs(list, planned.map((id) => t.places.find((x) => x.id === id)));
+  hydrateParking();
+  drawParkMarkers();
 }
 
 $('#list').addEventListener('click', (e) => {
@@ -2799,6 +2937,10 @@ $('#list').addEventListener('click', (e) => {
     openDetails(p, { inTrip: true });
   } else if (act === 'nav') openNav(p);
   else if (act === 'info') openDetails(p, { inTrip: true });
+  else if (act === 'parking') {
+    parkOpen.add(p.id);
+    renderMap();
+  }
   else if (act === 'done') markDone(p.id, true);
   else if (act === 'up') moveStop(p.id, -1);
   else if (act === 'down') moveStop(p.id, 1);
@@ -2884,9 +3026,15 @@ $('#snackUndo').addEventListener('click', () => {
 
 function openNav(p) {
   const plan = T().plan;
-  const lm = plan?.legs?.[plan.order.indexOf(p.id)]?.mode;
-  const mode = lm === 'foot' ? 'walking' : lm === 'transit' ? 'transit' : 'driving';
-  window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lon}&travelmode=${mode}`, '_blank');
+  const l = plan?.legs?.[plan.order.indexOf(p.id)];
+  // 要先开车到停车处、再走过去：导航到停车处
+  const car = l?.parts?.find((x) => x.mode === 'car');
+  if (car && l.parts.at(-1).mode === 'foot') {
+    toast(`先开到停车处「${car.to.name.split(' ')[0] || '附近'}」，停好车再走过去`, 3500);
+    return goNav(car.to, 'driving');
+  }
+  const mode = l?.mode === 'foot' ? 'walking' : l?.mode === 'transit' ? 'transit' : 'driving';
+  goNav(p, mode);
 }
 
 /* 地图页：加地点 */
@@ -3247,6 +3395,16 @@ function navSegments() {
 }
 
 function openNavAll() {
+  if (!state.navApp) return askNavApp(openNavAll);
+  // Waze / Apple 地图不能一次带很多站：导航到下一站
+  if (state.navApp !== 'google') {
+    const t = T();
+    const id = t.plan?.order.find((x) => stopInfoMap().has(x));
+    const p = id && t.places.find((x) => x.id === id);
+    if (!p) return toast('这天没有要去的地方');
+    toast(`${NAV_APPS[state.navApp]} 一次导航一站：先去「${p.name.split(' ')[0]}」`, 3000);
+    return openNav(p);
+  }
   const segs = navSegments();
   if (!segs.length) return toast('这天没有要去的地方');
   if (segs.length === 1) return window.open(segs[0].url, '_blank');
@@ -3399,6 +3557,7 @@ function onPosition(pos) {
   lastGps = me;
   showMe(me);
   if (pos.coords.accuracy > 150) return; // 定位太不准就先不判断
+  maybeParkReminder(me);
   const stops = t.plan.stops.map((s) => t.places.find((p) => p.id === s.id)).filter((p) => p && !p.done);
   const near = stops
     .map((p) => ({ p, d: haversine(me, p) }))
@@ -3797,6 +3956,244 @@ $('#ofDel').addEventListener('click', async () => {
 $('#ofClose').addEventListener('click', () => $('#offlineDialog').close());
 $('#btnOffline').addEventListener('click', openOffline);
 
+/* ================= 导航 App：Google Maps / Waze / Apple 地图 ================= */
+
+const NAV_APPS = { google: 'Google Maps', waze: 'Waze', apple: 'Apple 地图' };
+
+function navUrl(target, mode, app) {
+  const ll = `${target.lat.toFixed(6)},${target.lon.toFixed(6)}`;
+  if (app === 'waze') return `https://waze.com/ul?ll=${ll}&navigate=yes`;
+  if (app === 'apple') return `https://maps.apple.com/?daddr=${ll}&dirflg=${mode === 'walking' ? 'w' : mode === 'transit' ? 'r' : 'd'}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${ll}&travelmode=${mode}`;
+}
+
+// 用你选的导航 App 打开；第一次会问用哪个
+function goNav(target, mode = 'driving') {
+  const app = state.navApp;
+  if (!app) return askNavApp(() => goNav(target, mode));
+  // Waze 只能开车：走路 / 公交那段改用 Google Maps
+  const use = app === 'waze' && mode !== 'driving' ? 'google' : app;
+  if (use !== app) toast('Waze 不支持走路和公交，这段用 Google Maps', 3000);
+  window.open(navUrl(target, mode, use), '_blank');
+}
+
+let navAppAfter = null;
+function askNavApp(after = null) {
+  navAppAfter = after;
+  $('#naList').innerHTML = Object.entries(NAV_APPS)
+    .map(([k, v]) => `<button type="button" data-app="${k}" class="${state.navApp === k ? 'on' : ''}">${esc(v)}${k === 'waze' ? '<span>只能开车；一次导航到一站</span>' : k === 'apple' ? '<span>iPhone 自带</span>' : '<span>开车、走路、公交都可以</span>'}</button>`)
+    .join('');
+  $('#navAppDialog').showModal();
+}
+$('#naList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-app]');
+  if (!b) return;
+  state.navApp = b.dataset.app;
+  save();
+  $('#navAppDialog').close();
+  toast(`导航改用 ${NAV_APPS[state.navApp]}`);
+  if (currentView === 'map') renderMap();
+  const after = navAppAfter;
+  navAppAfter = null;
+  after?.();
+});
+$('#naClose').addEventListener('click', () => $('#navAppDialog').close());
+$('#btnNavApp').addEventListener('click', () => askNavApp());
+
+/* ================= 停车场：只自动显示「下一站」的，其他按了才找 ================= */
+
+const parkCache = new Map(); // 停车目标（坐标）→ 停车场列表
+const parkOpen = new Set(); // 打开了停车场列表的地点 id
+
+// 车要停在哪里：「开车到停车处再走过去」就是那个停车处，不然就是景点本身
+function parkTarget(id) {
+  const t = T();
+  const p = t.places.find((x) => x.id === id);
+  const l = stopInfoMap().get(id)?.legIn;
+  const car = l?.parts?.find((x) => x.mode === 'car');
+  const to = car && l.parts.at(-1).mode === 'foot' ? car.to : p;
+  return { key: `${to.lat.toFixed(5)},${to.lon.toFixed(5)}`, name: to.name || p.name, lat: to.lat, lon: to.lon, other: to !== p };
+}
+
+// 附近 600 米内的停车场，按「停好车走到那里」的真实走路时间排
+async function parkingNear(p) {
+  if (parkCache.has(p.key)) return parkCache.get(p.key);
+  const params = new URLSearchParams({ lat: p.lat.toFixed(6), lon: p.lon.toFixed(6), limit: '25', radius: '0.6' });
+  params.append('osm_tag', 'amenity:parking');
+  params.append('osm_tag', 'amenity:parking_entrance');
+  let list = [];
+  try {
+    const data = await fetch(`https://photon.komoot.io/reverse?${params}`).then((r) => r.json());
+    for (const f of data.features) {
+      const q = f.properties;
+      const it = { name: q.name || (q.osm_value === 'parking_entrance' ? '停车场入口' : '停车场'), lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], street: q.street || '' };
+      // 同一个停车场常有好几个点（入口、范围），太近的只留一个
+      if (!list.some((x) => haversine(x, it) < 40)) list.push(it);
+    }
+    const rows = await travelRow('foot', p, list).catch(() => []);
+    list.forEach((x, i) => (x.walk = rows[i] ? rows[i].dur : null));
+    list = list.filter((x) => x.walk == null || x.walk < 15 * 60e3).sort((a, b) => (a.walk ?? 1e9) - (b.walk ?? 1e9)).slice(0, 4);
+  } catch {
+    list = null;
+  }
+  parkCache.set(p.key, list);
+  return list;
+}
+
+function parkListHtml(p, list) {
+  if (list == null) return '<div class="pk-msg">找不到停车场资料（网络问题），等一下再试</div>';
+  if (!list.length) return '<div class="pk-msg">地图资料里附近 600 米没有停车场，可能要找路边停车</div>';
+  return list
+    .map((x, i) => `<div class="pk-row"><span class="pk-p">P</span><div class="pk-main"><b>${esc(x.name)}</b><span>${x.walk != null ? `停好车走 ${fmtDur(x.walk)}` : ''}${x.street ? ` · ${esc(x.street)}` : ''}</span></div>
+      <button type="button" data-parknav="${p.key}|${i}">${ic('nav', 14)} 导航</button></div>`)
+    .join('');
+}
+
+// 列表里的停车场区块（画完列表后补上）
+function hydrateParking() {
+  const t = T();
+  document.querySelectorAll('[data-parkfor]').forEach(async (el) => {
+    if (!t.places.some((x) => x.id === el.dataset.parkfor)) return;
+    const target = parkTarget(el.dataset.parkfor);
+    const list = await parkingNear(target);
+    if (!el.isConnected) return;
+    const head = target.other ? `车停在「${esc(target.name.split(' ')[0])}」附近，再走过来；那边的停车场` : '附近停车场';
+    el.innerHTML = `<div class="pk-head">${ic('car', 14)} ${head}</div>${parkListHtml(target, list)}`;
+    if (map && list?.length) drawParkMarkers();
+  });
+}
+
+// 地图上只画打开了的停车场
+let parkMarkers = [];
+function drawParkMarkers() {
+  parkMarkers.forEach((m) => m.remove());
+  parkMarkers = [];
+  for (const id of visibleParkIds()) {
+    if (!stopInfoMap().has(id)) continue;
+    for (const x of parkCache.get(parkTarget(id).key) || []) {
+      const el = document.createElement('div');
+      el.className = 'park-marker';
+      el.textContent = 'P';
+      el.title = x.name;
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toast(`${x.name}${x.walk != null ? `：停好车走 ${fmtDur(x.walk)}` : ''}`);
+      });
+      parkMarkers.push(new maplibregl.Marker({ element: el }).setLngLat([x.lon, x.lat]).addTo(map));
+    }
+  }
+}
+
+// 下一站（开车去的）自动显示；其他按了才显示
+function nextCarStopId() {
+  const t = T();
+  const info = stopInfoMap();
+  const id = t.plan?.order.find((x) => info.has(x));
+  return id && legKind(info.get(id).legIn) === 'car' ? id : null;
+}
+function visibleParkIds() {
+  const ids = new Set(parkOpen);
+  const n = nextCarStopId();
+  if (n) ids.add(n);
+  return ids;
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-parknav]');
+  if (!b) return;
+  const [key, i] = b.dataset.parknav.split('|');
+  const x = parkCache.get(key)?.[Number(i)];
+  if (x) goNav(x, 'driving');
+});
+
+/* ---- 快到下一站时，提醒停车场（行程当天、App 开着时） ---- */
+const parkReminded = new Set();
+async function maybeParkReminder(me) {
+  const id = nextCarStopId();
+  if (!id || parkReminded.has(id)) return;
+  const p = parkTarget(id);
+  const d = haversine(me, p);
+  if (d > 1500 || d < 150) return;
+  parkReminded.add(id);
+  const list = await parkingNear(p);
+  const best = list?.[0];
+  const where = p.other ? `停车处「${esc(p.name.split(' ')[0])}」` : `「${esc(p.name.split(' ')[0])}」`;
+  $('#ppText').innerHTML = best
+    ? `快到${where}了。最近的停车场：<b>${esc(best.name)}</b>${best.walk != null ? `（停好车走 ${fmtDur(best.walk)}）` : ''}`
+    : `快到${where}了。地图资料里附近没有停车场，可能要找路边停车。`;
+  $('#ppGo').hidden = !best;
+  $('#ppGo').dataset.parknav = best ? `${p.key}|0` : '';
+  $('#parkPrompt').hidden = false;
+}
+$('#ppClose').addEventListener('click', () => ($('#parkPrompt').hidden = true));
+$('#ppGo').addEventListener('click', () => ($('#parkPrompt').hidden = true));
+
+/* ================= 跟着我走（像地图 App 一样） ================= */
+
+let follow = null; // { watch, center, last, speed, eta, etaAt }
+function startFollow() {
+  if (!navigator.geolocation) return toast('这个浏览器不支持定位');
+  follow = { center: true, last: null, speed: null, eta: '', etaAt: 0 };
+  follow.watch = navigator.geolocation.watchPosition(onFollow, (e) => {
+    toast(e.code === 1 ? '没有定位权限' : '拿不到位置');
+    stopFollow();
+  }, { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 });
+  $('#btnLocate').classList.add('on');
+  $('#followHud').hidden = false;
+  $('#fhText').textContent = '正在定位…';
+}
+function stopFollow() {
+  if (follow?.watch != null) navigator.geolocation.clearWatch(follow.watch);
+  follow = null;
+  $('#btnLocate').classList.remove('on', 'paused');
+  $('#followHud').hidden = true;
+}
+
+function onFollow(pos) {
+  if (!follow) return;
+  const c = pos.coords;
+  const me = { lat: c.latitude, lon: c.longitude, at: Date.now(), heading: c.heading };
+  // 速度：有就用手机给的，没有就用两次位置算
+  let kmh = c.speed != null && c.speed >= 0 ? c.speed * 3.6 : null;
+  if (kmh == null && follow.last) {
+    const dt = (me.at - follow.last.at) / 1000;
+    if (dt > 0.5) kmh = (haversine(follow.last, me) / dt) * 3.6;
+  }
+  follow.last = me;
+  lastGps = me;
+  showMe(me);
+  if (follow.center && map) map.easeTo({ center: [me.lon, me.lat], zoom: Math.max(map.getZoom(), 15), duration: 600 });
+  // 到下一站还要多久：每 45 秒问一次真实路程
+  const t = T();
+  const info = stopInfoMap();
+  const nextId = t?.plan?.order.find((x) => info.has(x));
+  const next = nextId && t.places.find((x) => x.id === nextId);
+  if (next && Date.now() - follow.etaAt > 45e3) {
+    follow.etaAt = Date.now();
+    const kind = legKind(info.get(nextId).legIn);
+    travelRow(kind === 'foot' ? 'foot' : 'car', me, [next]).then(([r]) => {
+      if (follow && r) follow.eta = `到「${next.name.split(' ')[0]}」约 ${fmtDur(r.dur)} · ${fmtDist(r.dist)}`;
+    }).catch(() => {});
+  }
+  $('#fhSpeed').textContent = kmh != null ? Math.round(kmh) : '–';
+  $('#fhText').textContent = follow.eta || (next ? `下一站：${next.name.split(' ')[0]}` : '跟着你的位置');
+  maybeParkReminder(me);
+}
+
+$('#btnLocate').addEventListener('click', () => {
+  if (!follow) return startFollow();
+  if (!follow.center) {
+    // 手动拖过地图：再按一下回到你的位置
+    follow.center = true;
+    $('#btnLocate').classList.remove('paused');
+    if (follow.last) map.easeTo({ center: [follow.last.lon, follow.last.lat], zoom: Math.max(map.getZoom(), 15) });
+    return;
+  }
+  stopFollow();
+  toast('已停止跟随');
+});
+$('#fhStop').addEventListener('click', stopFollow);
+
 /* ================= 编辑地点 ================= */
 
 let editingId = null;
@@ -4037,14 +4434,6 @@ $('#mapBack').addEventListener('click', () => {
   showView('trips');
 });
 $('#btnFit').addEventListener('click', fitAll);
-$('#btnLocate').addEventListener('click', async () => {
-  try {
-    const p = await getGps();
-    map.flyTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 14) });
-  } catch (e) {
-    toast(e.message);
-  }
-});
 
 // 每次回到 App：超过 5 分钟就按现在的位置和时间重新算
 document.addEventListener('visibilitychange', () => {
@@ -4062,6 +4451,28 @@ setInterval(() => {
 /* ================= 启动 ================= */
 
 document.querySelectorAll('[data-ic]').forEach((el) => (el.innerHTML = ic(el.dataset.ic, 20)));
+
+// 示例行程只给主人看：用 ?owner=1 打开一次，这支手机就会记住（?owner=0 取消）
+// 一般人打开是空的，只有「开始规划新行程」。行程本来就只存在各自的手机里，互相看不到
+(() => {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('owner')) return;
+  try {
+    if (q.get('owner') === '0') localStorage.removeItem('shunlu:owner');
+    else localStorage.setItem('shunlu:owner', '1');
+  } catch {}
+  q.delete('owner');
+  history.replaceState(null, '', location.pathname + (q.toString() ? `?${q}` : '') + location.hash);
+  toast(localStorage.getItem('shunlu:owner') ? '这支手机会显示示例行程（测试用）' : '已关闭示例行程');
+})();
+const isOwner = (() => {
+  try {
+    return localStorage.getItem('shunlu:owner') === '1';
+  } catch {
+    return false;
+  }
+})();
+$('#btnDemo').hidden = !isOwner;
 
 // 上次停在某个行程的地图上：直接回到那里并重新计算；否则显示首页
 const resumeTrip = T();

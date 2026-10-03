@@ -637,3 +637,73 @@ dialog.full > * { min-width: 0; }
 .dc-info { color: var(--accent); display: flex; padding: 2px; }
 .tl-card .acts button[data-act="info"] { color: var(--accent); background: var(--accent-soft); }
 .tl-card .acts button { white-space: nowrap; padding: 8px 4px; font-size: 12.5px; gap: 4px; }
+
+/* 地图标记：号码旁边的小图标（怎么到这里） */
+/* 不要改 position：地图套件用 position: absolute 摆放标记（改了标记就会跑位） */
+.marker { overflow: visible; }
+.mk-how {
+  position: absolute; right: -9px; top: -9px; width: 19px; height: 19px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .3);
+}
+.mk-how svg { width: 11px; height: 11px; }
+
+/* 走回停车处 → 开车 → 走过去 */
+.leg-chain { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 6px 0; }
+.leg-chain .leg-pill { white-space: normal; text-align: left; line-height: 1.35; }
+.leg.combo .tl-rail::before { background: linear-gradient(to bottom, var(--foot) 0 22%, var(--car) 22% 78%, var(--foot) 78%); }
+.park-chip { background: #eef3ff !important; color: #1d4ed8 !important; }
+
+/* 加地点：从下面升起，占画面下方，上面还看得到地图 */
+dialog#addDialog {
+  margin: auto auto 0; width: 100%; max-width: 640px; height: 76vh; max-height: 76vh;
+  border-radius: 22px 22px 0 0; animation: sheet-up .22s ease-out;
+}
+dialog#addDialog::backdrop { background: rgba(11, 18, 32, .25); }
+dialog#addDialog .dhead { padding-top: 12px; border-radius: 22px 22px 0 0; }
+dialog#addDialog .dhead::before { content: ''; position: absolute; left: 50%; top: 6px; width: 38px; height: 4px; margin-left: -19px; border-radius: 3px; background: var(--line); }
+dialog#addDialog .dhead { position: relative; }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (min-width: 900px) { dialog#addDialog { margin: auto; height: 80vh; border-radius: var(--r-lg); } }
+
+/* 跟着我走 */
+.fab.on { background: var(--accent); color: #fff; }
+.fab.on.paused { background: var(--card); color: var(--accent); box-shadow: 0 0 0 2px var(--accent), var(--sh-2); }
+#followHud {
+  position: absolute; z-index: 7; top: calc(66px + var(--safe-t)); left: 12px; right: 12px; max-width: 520px; margin: 0 auto;
+  display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 12px; background: var(--card); border-radius: 16px; box-shadow: var(--sh-2);
+}
+.fh-speed { display: flex; flex-direction: column; align-items: center; min-width: 46px; line-height: 1.1; }
+.fh-speed b { font-size: 22px; font-weight: 800; }
+.fh-speed span { font-size: 10.5px; color: var(--muted); }
+#fhText { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; }
+.me-dot { position: absolute; }
+.me-dot.dir::after {
+  content: ''; position: absolute; left: 50%; top: -11px; margin-left: -6px; border: 6px solid transparent; border-bottom: 9px solid #2563eb;
+  transform-origin: 6px 20px; transform: rotate(var(--hd, 0deg));
+}
+@media (min-width: 900px) { #followHud { left: calc(var(--side) + 20px); } }
+
+/* 停车场 */
+.park-btn { cursor: pointer; background: #eef3ff !important; color: #1d4ed8 !important; }
+.park-box { margin-top: 8px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.pk-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px; font-size: 12.5px; font-weight: 700; background: var(--line-2); }
+.pk-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid var(--line-2); }
+.pk-p { width: 24px; height: 24px; border-radius: 6px; background: #1d4ed8; color: #fff; font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; flex: none; }
+.pk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pk-main b { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-main span { font-size: 12px; color: var(--muted); }
+.pk-row button { padding: 6px 10px; font-size: 12.5px; border-radius: 999px; }
+.pk-msg { padding: 9px 10px; font-size: 12.5px; color: var(--muted); }
+.park-marker { width: 22px; height: 22px; border-radius: 6px; background: #1d4ed8; color: #fff; font-weight: 800; font-size: 12px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .35); cursor: pointer; font-family: var(--font); }
+#parkPrompt {
+  position: absolute; z-index: 9; top: calc(70px + var(--safe-t)); left: 12px; right: 12px; max-width: 520px; margin: 0 auto;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--sh-3); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px; font-size: 14px; animation: pick-in .2s ease-out;
+}
+@media (min-width: 900px) { #parkPrompt { left: calc(var(--side) + 20px); right: 20px; } }
+
+/* 选导航 App */
+.na-list { display: flex; flex-direction: column; gap: 8px; }
+.na-list button { flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: 14px; font-size: 15px; }
+.na-list button span { font-size: 12px; color: var(--muted); font-weight: 500; }
+.na-list button.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
