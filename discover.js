@@ -316,6 +316,36 @@ export function tileThumb(lat, lon, z = 16) {
   return { url: `https://tile.openstreetmap.org/${z}/${x}/${y}.png`, px: xf - x, py: yf - y };
 }
 
+/* ---------------- 首页的热门路线模板：按一下就有城市、天数和热门景点 ---------------- */
+// city = CITY_PRESETS 的名字；cover = 封面照片要找的地标（用名字 + 坐标在维基百科找）
+export const TEMPLATES = [
+  { city: '槟城', days: 3, line: '古迹壁画 · 升旗山 · 海边夜市', cover: { wikidata: 'Q822518', name: 'Kek Lok Si', lat: 5.3997, lon: 100.2739 }, curated: true },
+  { city: '吉隆坡', days: 2, line: '双子塔 · 黑风洞 · 茨厂街', cover: { wikidata: 'Q83063', name: 'Petronas Towers', lat: 3.1579, lon: 101.7116 } },
+  { city: '马六甲', days: 1, line: '荷兰红屋 · 鸡场街 · 河边', cover: { wikidata: 'Q5108702', name: 'Christ Church Melaka', lat: 2.1945, lon: 102.249 } },
+  { city: '新加坡', days: 3, line: '滨海湾 · 植物园 · 牛车水', cover: { wikidata: 'Q548679', name: 'Marina Bay Sands', lat: 1.2834, lon: 103.8607 } },
+  { city: '曼谷', days: 3, line: '大皇宫 · 郑王庙 · 夜市', cover: { wikidata: 'Q724970', name: 'Wat Arun', lat: 13.7437, lon: 100.4888 } },
+  { city: '东京', days: 4, line: '浅草寺 · 东京塔 · 明治神宫', cover: { wikidata: 'Q183536', name: 'Tokyo Tower', lat: 35.6586, lon: 139.7454 } },
+];
+
+// 从热门景点里挑 n 个：越有名越先，但太近的（同一个地方的不同建筑）只要一个，同一类不要太多
+const NOT_FOR_TOURISTS = /office|parliament|legislat|government|headquarters|embassy|university|college|school|hospital|court|ministry|bank|company|telecommunication|police|prison|residential|hotel|condominium/i;
+export function pickTemplatePlaces(items, n) {
+  const out = [];
+  const perCat = {};
+  const maxCat = Math.max(2, Math.ceil(n / 2));
+  for (const r of items) {
+    if (out.length >= n) break;
+    // 办公楼、政府机关这类，游客通常不会特地去
+    if (NOT_FOR_TOURISTS.test(r.type || '')) continue;
+    const cat = categoryOf(r.type);
+    if ((perCat[cat] || 0) >= maxCat) continue;
+    if (out.some((x) => distM(x, r) < 250)) continue;
+    perCat[cat] = (perCat[cat] || 0) + 1;
+    out.push(r);
+  }
+  return out;
+}
+
 /* ---------------- 示例行程：槟城（测试用） ---------------- */
 
 export function penangDemo() {

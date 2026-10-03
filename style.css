@@ -707,3 +707,121 @@ dialog#addDialog .dhead { position: relative; }
 .na-list button { flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 14px; border-radius: 14px; font-size: 15px; }
 .na-list button span { font-size: 12px; color: var(--muted); font-weight: 500; }
 .na-list button.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+
+/* ============ 首页：装到桌面、三步说明、热门路线模板 ============ */
+.install-card { display: flex; align-items: center; gap: 12px; padding: 10px 8px 10px 10px; border-radius: var(--r); margin-bottom: 12px; box-shadow: 0 6px 24px rgba(15, 23, 42, .06); }
+.ic-app img { width: 44px; height: 44px; border-radius: 12px; display: block; box-shadow: var(--sh-1); }
+.ic-main { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+.ic-main b { font-size: 14.5px; }
+.ic-main span { font-size: 12.5px; color: var(--muted); }
+.ic-main span .ic { vertical-align: -2px; }
+.install-card .primary { padding: 8px 14px; border-radius: 999px; }
+.onboard { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--r-lg); margin-bottom: 4px; box-shadow: 0 6px 24px rgba(15, 23, 42, .06); }
+.ob-step { display: flex; gap: 12px; align-items: flex-start; }
+.ob-step b { width: 28px; height: 28px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13.5px; color: #fff; background: linear-gradient(135deg, #2563eb, #0ea5e9); box-shadow: 0 4px 12px rgba(37, 99, 235, .3); }
+.ob-step span { display: flex; flex-direction: column; font-weight: 700; font-size: 14.5px; line-height: 1.35; padding-top: 3px; }
+.ob-step small { font-weight: 500; font-size: 12.5px; color: var(--muted); }
+.tpl-list { display: flex; gap: 12px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px 10px; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.tpl-list::-webkit-scrollbar { display: none; }
+.tpl-card {
+  flex: none; width: 168px; flex-direction: column; align-items: stretch; gap: 0; padding: 0; overflow: hidden; border-radius: 18px; text-align: left; scroll-snap-align: start; font-weight: 400;
+  background: rgba(255, 255, 255, .6); border: 1px solid rgba(255, 255, 255, .8); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); box-shadow: 0 6px 22px rgba(15, 23, 42, .08);
+}
+.tpl-img { position: relative; height: 104px; background: linear-gradient(140deg, #60a5fa, #34d399) center / cover; }
+.tpl-img.has-img::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(0, 0, 0, .35), transparent 60%); }
+.tpl-flag { position: absolute; left: 8px; top: 7px; font-size: 18px; z-index: 1; }
+.tpl-days { position: absolute; right: 8px; bottom: 7px; z-index: 1; font-size: 12px; font-weight: 800; color: #fff; background: rgba(11, 18, 32, .55); padding: 2px 9px; border-radius: 999px; }
+.tpl-body { display: flex; flex-direction: column; padding: 9px 11px 11px; gap: 2px; }
+.tpl-body b { font-size: 15px; }
+.tpl-body span { font-size: 12px; color: var(--muted); line-height: 1.4; }
+@media (prefers-color-scheme: dark) { .tpl-card { background: rgba(22, 26, 34, .6); border-color: rgba(255, 255, 255, .08); } }
+
+/* ============ 一次贴上很多地点 ============ */
+.bulk-link { margin: 6px 0 2px; font-size: 13px; gap: 5px; }
+#bulkText { width: 100%; resize: vertical; min-height: 130px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: 14.5px; line-height: 1.5; }
+#bulkText:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+#bulkStatus:empty { display: none; }
+#pkMiss { background: var(--warn-soft); padding: 7px 10px; border-radius: 10px; display: block; }
+
+/* ============ 每一天的时间条 ============ */
+.daybar { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; margin: 0 0 10px; }
+.db-track { display: flex; gap: 2px; height: 14px; border-radius: 7px; overflow: hidden; }
+.db-track i { min-width: 3px; display: block; height: 100%; }
+.db-car { background: #2563eb; }
+.db-foot { background: #059669; }
+.db-bus { background: #7c3aed; }
+.db-train { background: #ea580c; }
+.db-visit { background: #cbd5e1; cursor: pointer; }
+.db-wait { background: repeating-linear-gradient(45deg, #fcd34d 0 3px, #fef3c7 3px 6px); }
+.db-scale { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 6px; font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.db-legend { display: flex; align-items: center; gap: 4px; font-weight: 500; color: var(--faint); }
+.db-legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-left: 4px; }
+.db-stats { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-size: 12.5px; font-weight: 600; }
+.db-stats span { display: inline-flex; align-items: center; gap: 5px; }
+.db-stats svg { width: 13px; height: 13px; padding: 3px; border-radius: 50%; box-sizing: content-box; }
+.db-stats .s-car svg { background: #2563eb; }
+.db-stats .s-foot svg { background: #059669; }
+.db-stats .s-bus svg { background: #7c3aed; }
+.daybar.compact { margin: 0 12px 10px 16px; padding: 0; border: none; background: none; }
+.daybar.compact .db-track { height: 8px; border-radius: 4px; }
+.daybar.compact .db-stats { margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+@media (prefers-color-scheme: dark) { .db-visit { background: #475569; } }
+
+/* ============ 日落、黄金时段 ============ */
+.sun-mini { display: inline-flex; align-items: center; gap: 3px; color: #c2410c; font-weight: 600; }
+.gold-chip { background: linear-gradient(90deg, #fde68a, #fdba74) !important; color: #9a3412 !important; }
+.sun-chip { background: #fff7ed !important; color: #c2410c !important; }
+@media (prefers-color-scheme: dark) { .sun-chip { background: #2a1a0e !important; } .sun-mini { color: #fdba74; } }
+
+/* ============ 关门 / 休息：更明显，一键换天 ============ */
+.stop.bad .tl-card { border-color: #fca5a5; box-shadow: inset 3px 0 0 var(--bad); }
+.closed-note { font-weight: 700; }
+.move-days { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.move-days button { padding: 5px 10px; font-size: 12px; border-radius: 999px; border-color: transparent; color: #fff; background: var(--dc, var(--accent)); }
+.dc-warn > span { flex: 1; min-width: 0; }
+.dc-warn .move-days { margin-top: 6px; }
+.marker.bad::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid #dc2626; animation: ring-pulse 1.6s ease-out infinite; pointer-events: none; }
+@keyframes ring-pulse { 0% { opacity: .9; transform: scale(.85); } 100% { opacity: 0; transform: scale(1.5); } }
+
+/* ============ 拖动调整顺序 ============ */
+.tl-card .acts .drag-h { flex: 2; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; color: var(--accent); background: var(--accent-soft); border: 1px dashed var(--accent); }
+.tl-card .acts .mv { flex: none; width: 42px; }
+.stop.dragging { position: relative; z-index: 5; opacity: .95; }
+.stop.dragging .tl-card { box-shadow: var(--sh-3); border-color: var(--accent); }
+.stop.drop-before .tl-card { box-shadow: 0 -4px 0 -1px var(--accent); }
+.stop.drop-after .tl-card { box-shadow: 0 4px 0 -1px var(--accent); }
+#list.drag-on { touch-action: none; }
+.stop.bump .num { animation: num-bump .5s ease-out; }
+@keyframes num-bump { 0% { transform: scale(1); } 40% { transform: scale(1.35); background: var(--accent); } 100% { transform: scale(1); } }
+
+/* ============ 地图和列表连动 ============ */
+/* 注意：不能改 .marker 的 transform / position（地图套件用来摆位置） */
+.marker.hl { z-index: 3; box-shadow: 0 0 0 4px rgba(37, 99, 235, .45), 0 4px 14px rgba(0, 0, 0, .4); }
+.marker.hl::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; border: 2px solid #2563eb; animation: ring-pulse 1.2s ease-out infinite; pointer-events: none; }
+.dc-item.hl .dc-name { color: var(--accent); }
+
+/* ============ 预览路线 ============ */
+#fabs, #mapLegend { transition: opacity .2s, bottom .25s; }
+body.touring #fabs, body.touring #mapLegend { opacity: 0; pointer-events: none; }
+#tourBar {
+  position: absolute; z-index: 7; top: calc(66px + var(--safe-t)); left: 12px; right: 12px; max-width: 520px; margin: 0 auto;
+  display: flex; align-items: center; gap: 10px; padding: 10px 8px 14px 14px; background: rgba(11, 18, 32, .82); color: #fff; border-radius: 16px;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: var(--sh-3); overflow: hidden;
+}
+.tb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+.tb-main b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tb-main span { font-size: 12.5px; opacity: .75; }
+.tb-prog { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255, 255, 255, .15); }
+.tb-prog i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #38bdf8, #2563eb); }
+#tourBar .icon-btn { color: #fff; }
+#tourBar .icon-btn:hover { background: rgba(255, 255, 255, .12); }
+.tour-dot { width: 20px; height: 20px; border-radius: 50%; background: #f97316; border: 3px solid #fff; box-shadow: 0 0 0 8px rgba(249, 115, 22, .25), 0 2px 8px rgba(0, 0, 0, .4); }
+@media (min-width: 900px) { #tourBar { left: calc(var(--side) + 20px); } }
+
+/* ============ 跟随：语音开关 ============ */
+#fhVoice { color: var(--accent); }
+#fhVoice.off { color: var(--faint); }
+
+/* ============ 行程图片 ============ */
+.poster-box { border-radius: 14px; overflow: hidden; background: var(--line-2); min-height: 160px; display: flex; align-items: center; justify-content: center; }
+.poster-box img { display: block; width: 100%; height: auto; max-height: 58vh; object-fit: contain; }

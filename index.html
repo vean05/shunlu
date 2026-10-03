@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- 所有文件都放在同一层（没有文件夹），上传 GitHub 比较方便。改了 style.css / app.js 就把 v= 加一，手机才会拿到新版 -->
-  <link rel="stylesheet" href="style.css?v=15">
+  <link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 
@@ -42,6 +42,21 @@
       </div>
 
       <div class="home-body">
+        <!-- 教用户装到手机桌面（装好就不会再出现） -->
+        <div id="installCard" class="install-card glass" hidden>
+          <div class="ic-app"><img src="icon-192.png" alt=""></div>
+          <div class="ic-main"><b>把顺路装到手机桌面</b><span id="installText">像 App 一样全屏打开，速度更快</span></div>
+          <button type="button" id="installGo" class="primary">安装</button>
+          <button type="button" id="installX" class="icon-btn sm" aria-label="不用了"><span data-ic="x"></span></button>
+        </div>
+
+        <!-- 第一次用：三步说明（有行程后就不显示） -->
+        <div id="onboard" class="onboard glass" hidden>
+          <div class="ob-step"><b>1</b><span>选城市，挑想去的地方<small>热门景点有照片，也可以一次贴上一整串</small></span></div>
+          <div class="ob-step"><b>2</b><span>自动分好每一天、排出最顺的路线<small>按真实路程和营业时间算</small></span></div>
+          <div class="ob-step"><b>3</b><span>出发时一键导航，边走边更新<small>Google Maps、Waze 都可以</small></span></div>
+        </div>
+
         <button id="btnDemo" class="demo-card">
           <div class="demo-img" id="demoImg"></div>
           <div class="demo-text">
@@ -55,6 +70,10 @@
         <div id="tripSection">
           <h3 class="section-h">我的行程</h3>
           <div id="tripList"></div>
+        </div>
+        <div id="tplSection">
+          <h3 class="section-h">热门路线 · 一键套用，再自己改</h3>
+          <div class="tpl-list" id="tplList"></div>
         </div>
         <div class="trip-tools">
           <button id="btnExport" class="link">导出备份</button>
@@ -204,11 +223,18 @@
     <div id="followHud" hidden>
       <div class="fh-speed"><b id="fhSpeed">–</b><span>km/h</span></div>
       <div id="fhText"></div>
+      <button type="button" id="fhVoice" class="icon-btn sm" aria-label="语音提醒"><span data-ic="volume"></span></button>
       <button type="button" id="fhStop" class="icon-btn sm" aria-label="停止跟随"><span data-ic="x"></span></button>
     </div>
     <div id="parkPrompt" hidden>
       <span id="ppText"></span>
       <div class="gp-btns"><button type="button" id="ppClose">知道了</button><button type="button" id="ppGo" class="primary">导航到停车场</button></div>
+    </div>
+    <!-- 预览路线动画 -->
+    <div id="tourBar" hidden>
+      <div class="tb-main"><b id="tbTitle"></b><span id="tbSub"></span></div>
+      <div class="tb-prog"><i id="tbProg"></i></div>
+      <button type="button" id="tbStop" class="icon-btn sm" aria-label="停止预览"><span data-ic="x"></span></button>
     </div>
     <div id="geoPrompt" hidden>
       <span id="gpText"></span>
@@ -224,12 +250,13 @@
       <div id="sheetHead">
         <div class="sh-row">
           <div id="summary"></div>
+          <button id="btnPreview" class="icon-btn sm" title="预览路线" aria-label="预览路线"><span data-ic="play"></span></button>
           <button id="btnReplan" class="icon-btn sm" title="重新计算" aria-label="重新计算"><span data-ic="refresh"></span></button>
         </div>
         <div id="status"></div>
         <div id="dayTabs" class="day-tabs" hidden></div>
         <div id="reorderBar" hidden>
-          <div class="small">用 ▲ ▼ 移动地点，时间会马上重算</div>
+          <div class="small">按住 <span data-ic="grip"></span> 拖到想要的位置，时间会马上重算</div>
           <div class="rb-btns">
             <button id="btnAutoOrder">恢复最优顺序</button>
             <button id="btnReorderDone" class="primary">完成</button>
@@ -252,6 +279,8 @@
       <button id="btnOffline"><span data-ic="download"></span><div><b>离线地图</b><span>出国没网络也能看地图</span></div></button>
       <button id="btnNavApp"><span data-ic="nav"></span><div><b>导航用哪个 App</b><span>Google Maps、Waze 或 Apple 地图</span></div></button>
       <button id="btnShare"><span data-ic="share"></span><div><b>分享给朋友</b><span>传一个链接，朋友打开就有一样的行程</span></div></button>
+      <button id="btnPoster"><span data-ic="image"></span><div><b>生成行程图片</b><span>路线地图 + 每一站，传 WhatsApp、小红书、IG</span></div></button>
+      <button id="btnCalendar"><span data-ic="calendar"></span><div><b>加进手机日历</b><span>每一站变成日历活动，到时间会提醒（自己选要不要）</span></div></button>
       <button id="btnAI"><span data-ic="sparkles"></span><div><b>问 AI 建议</b><span>复制行程，贴到 ChatGPT / Gemini</span></div></button>
     </div>
     <button class="menu-cancel" id="menuCancel">取消</button>
@@ -335,6 +364,7 @@
     <div class="pk-box">
       <h3 id="pkTitle">加入这些地点？</h3>
       <p class="small muted">不要的按 ✕ 拿掉。加入后还可以在「已添加」里移除。</p>
+      <div id="pkMiss" class="small note warn" hidden></div>
       <div id="pkList" class="sres"></div>
       <div class="dialog-actions">
         <button type="button" id="pkCancel">再想想</button>
@@ -435,10 +465,39 @@
     </div>
   </dialog>
 
+  <!-- 一次贴上很多地点 -->
+  <dialog id="bulkDialog">
+    <div class="pk-box">
+      <div class="ml-ic si-ic2" data-ic="clipboard"></div>
+      <h3>一次贴上很多地点</h3>
+      <p class="small muted">从小红书、文章、聊天里复制一整段都可以：一行一个、用逗号或「、」分开、或一串 Google Maps 链接。会帮你找出来，再让你确认。</p>
+      <textarea id="bulkText" rows="7" placeholder="例如：&#10;1. 极乐寺&#10;2. 升旗山&#10;3. 姓周桥、打铜仔街壁画&#10;https://www.google.com/maps/place/..."></textarea>
+      <div id="bulkStatus" class="small muted"></div>
+      <div class="dialog-actions">
+        <button type="button" id="bulkPaste">从剪贴板贴上</button>
+        <button type="button" id="bulkCancel">取消</button>
+        <button type="button" id="bulkGo" class="primary">找出这些地点</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 行程图片 -->
+  <dialog id="posterDialog">
+    <div class="pk-box">
+      <h3>行程图片</h3>
+      <div id="posterBox" class="poster-box"><div class="pop-loading">正在画图…</div></div>
+      <div class="dialog-actions">
+        <button type="button" id="posterClose">关闭</button>
+        <button type="button" id="posterSave">存到手机</button>
+        <button type="button" id="posterShare" class="primary">分享</button>
+      </div>
+    </div>
+  </dialog>
+
   <div id="toast" hidden></div>
   <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script type="module" src="app.js?v=15"></script>
+  <script type="module" src="app.js?v=16"></script>
 </body>
 </html>
