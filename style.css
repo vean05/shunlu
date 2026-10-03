@@ -900,3 +900,20 @@ dialog::backdrop { background: rgba(15, 23, 42, .32); backdrop-filter: blur(2px)
   .hr-plane { display: none; }
 }
 .nw, .sun-mini, .wx-chip { white-space: nowrap; }
+
+/* ============ 酒店：入住 / 退房时间、最后一天 ============ */
+.sr-times { display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap; }
+.sr-times label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.sr-times input { padding: 3px 6px; font-size: 13px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.last-night { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; font-weight: 700; font-size: 14px; cursor: pointer; }
+.last-night input { margin-top: 3px; }
+.last-night span { display: flex; flex-direction: column; }
+.last-night small { font-weight: 500; font-size: 12px; color: var(--muted); }
+.ep-text em.hotel-tip { display: block; white-space: normal; font-style: normal; font-size: 12px; font-weight: 600; margin: 4px 0 2px; padding: 5px 9px; border-radius: 10px; background: #eef3ff; color: #1d4ed8; line-height: 1.4; }
+.ep-text em.hotel-tip.warn { background: var(--warn-soft); color: var(--warn); }
+.ep-text em.hotel-tip.ok { background: var(--ok-soft); color: var(--ok); }
+.ep-text em.hotel-tip .ic { vertical-align: -2px; }
+.dc-swap { color: var(--muted) !important; font-weight: 600; }
+.last-day-note { display: flex; align-items: center; gap: 6px; margin: 8px 4px 0 82px; font-size: 12.5px; color: var(--ok); font-weight: 600; }
+.sr-times label { flex-direction: row !important; margin: 0 !important; }
+.sr-times input[type="time"] { width: auto !important; min-width: 0; height: 30px; padding: 2px 6px !important; font-size: 13px !important; font-weight: 700; border-radius: 8px !important; margin: 0 !important; }

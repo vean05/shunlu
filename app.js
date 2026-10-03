@@ -1,9 +1,9 @@
-import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=17';
-import { optimize, evaluate } from './optimizer.js?v=17';
-import { arrangeDays } from './days.js?v=17';
-import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=17';
-import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=17';
-import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=17';
+import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=18';
+import { optimize, evaluate } from './optimizer.js?v=18';
+import { arrangeDays } from './days.js?v=18';
+import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=18';
+import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=18';
+import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=18';
 
 /* ================= 状态与保存 ================= */
 
@@ -1017,9 +1017,26 @@ function hotelForNight(t, n) {
 }
 // 某一天从哪间出发、晚上回哪间
 const startHotel = (t, day) => (day == null ? t.home : hotelForNight(t, day === 1 ? 1 : day - 1));
-const endHotel = (t, day) => (day == null ? t.home : hotelForNight(t, day));
+const endHotel = (t, day) => (day == null ? t.home : day > nights(t) ? null : hotelForNight(t, day));
 const sameHotel = (a, b) => (!a && !b) || (a && b && Math.abs(a.lat - b.lat) < 1e-5 && Math.abs(a.lon - b.lon) < 1e-5);
-const nights = (t) => Math.max(1, t.days || 1);
+// 4 天 = 3 晚（最后一天退房后去玩，不用回酒店）；勾了「最后一天也住」就是 4 晚
+const nights = (t) => Math.max(1, (t.days || 1) > 1 && !t.stayLastNight ? t.days - 1 : t.days || 1);
+// 入住 / 退房时间（只是提醒，不会硬性排进路线）
+const DEFAULT_IN = '15:00';
+const DEFAULT_OUT = '12:00';
+const checkInOf = (h) => h?.checkIn || DEFAULT_IN;
+const checkOutOf = (h) => h?.checkOut || DEFAULT_OUT;
+// 同一间酒店的每一晚都一起改
+function setHotelTimes(t, hotel, field, value) {
+  for (const h of [t.home, ...(t.stays || []).map((x) => x.hotel)]) if (h && sameHotel(h, hotel)) h[field] = value;
+  save();
+}
+// 换酒店时保留原本填的时间；新的酒店给常见的 15:00 入住、12:00 退房
+function withTimes(t, hotel) {
+  if (!hotel) return hotel;
+  const old = [t.home, ...(t.stays || []).map((x) => x.hotel)].find((h) => h && sameHotel(h, hotel));
+  return { ...hotel, checkIn: hotel.checkIn || old?.checkIn || DEFAULT_IN, checkOut: hotel.checkOut || old?.checkOut || DEFAULT_OUT };
+}
 const hasAnyHotel = (t) => Array.from({ length: nights(t) }, (_, i) => hotelForNight(t, i + 1)).some(Boolean);
 // 所有不同的酒店（地图上显示用）
 function allHotels(t) {
@@ -1033,6 +1050,7 @@ function allHotels(t) {
 
 // 设定第 n 晚开始住 hotel；之后原本跟第 n 晚住同一间的晚上也一起换
 function setHotelFrom(t, n, hotel) {
+  hotel = withTimes(t, hotel);
   const N = nights(t);
   const before = Array.from({ length: N }, (_, i) => hotelForNight(t, i + 1));
   const after = [...before];
@@ -1047,6 +1065,7 @@ function setHotelFrom(t, n, hotel) {
 
 // 这几晚设成同一间（建议用）
 function setHotelRange(t, from, to, hotel) {
+  hotel = withTimes(t, hotel);
   const N = nights(t);
   const after = Array.from({ length: N }, (_, i) => hotelForNight(t, i + 1));
   for (let k = from; k <= to; k++) after[k - 1] = hotel;
@@ -1069,12 +1088,21 @@ function renderStays() {
     const h = hotelForNight(t, n);
     const label = N > 1 ? `第 ${n} 晚 · ${fmtDay(t, n)}` : '住宿';
     const changed = n > 1 && !sameHotel(h, hotelForNight(t, n - 1));
+    // 每间酒店的第一晚：填入住、退房时间
+    const first = h && (n === 1 || changed);
     rows.push(`<div class="stay-row ${n === stayTarget ? 'on' : ''} ${changed ? 'changed' : ''}" data-night="${n}">
       <div class="sr-ic">${ic('bed', 18)}</div>
       <div class="sr-main"><div class="sr-label">${esc(label)}${changed ? ' <span class="badge">换酒店</span>' : ''}</div>
-        <div class="sr-name">${h ? esc(h.name) : '<span class="muted">还没选</span>'}</div></div>
+        <div class="sr-name">${h ? esc(h.name) : '<span class="muted">还没选</span>'}</div>
+        ${first ? `<div class="sr-times" data-hn="${n}">
+          <label>入住 <input type="time" data-ht="checkIn" value="${esc(checkInOf(h))}"></label>
+          <label>退房 <input type="time" data-ht="checkOut" value="${esc(checkOutOf(h))}"></label></div>` : ''}</div>
       <button type="button" class="sr-btn" data-stay="${n}">${h ? '更换' : '选酒店'}</button>
     </div>`);
+  }
+  if ((t.days || 1) > 1) {
+    rows.push(`<label class="check last-night"><input type="checkbox" id="stayLast" ${t.stayLastNight ? 'checked' : ''}>
+      <span>第 ${t.days} 天（最后一天）晚上也住<small>不勾 = ${t.days} 天 ${t.days - 1} 晚，最后一天退房后去玩，不用回酒店</small></span></label>`);
   }
   $('#stayList').innerHTML = rows.join('');
   $('#homeSearchLabel').textContent = N > 1
@@ -1083,7 +1111,25 @@ function renderStays() {
   $('#skipHome').hidden = hasAnyHotel(t);
 }
 
+$('#stayList').addEventListener('change', (e) => {
+  const t = T();
+  if (e.target.id === 'stayLast') {
+    // 最后一晚没另外选的话，会沿用前一晚的酒店
+    t.stayLastNight = e.target.checked;
+    if (t.dayPlans) delete t.dayPlans[t.days];
+    staySugg = null;
+    save();
+    renderStays();
+    return;
+  }
+  const field = e.target.dataset.ht;
+  const row = e.target.closest('[data-hn]');
+  if (!field || !row || !e.target.value) return;
+  setHotelTimes(t, hotelForNight(t, Number(row.dataset.hn)), field, e.target.value);
+  toast(`${field === 'checkIn' ? '入住' : '退房'}时间：${e.target.value}（只是提醒，不会硬性排）`);
+});
 $('#stayList').addEventListener('click', (e) => {
+  if (e.target.closest('.sr-times, .last-night')) return;
   const b = e.target.closest('[data-stay]') || e.target.closest('.stay-row');
   if (!b) return;
   stayTarget = Number(b.dataset.stay || b.dataset.night);
@@ -2417,7 +2463,7 @@ function parkWalkLegs({ pts, placeIdx, originIdx, endIdx, walk, drive, walkMax }
 // 某天的营业时间窗口（绝对时间）
 // 自己定的时间（例如「11:00 去」）→ 那一天几点的时间戳
 function fixedAt(p, startTime) {
-  if (!p.fixedTime) return null;
+  if (!p.fixedTime || p.checkin) return null;
   const [h, m] = p.fixedTime.split(':').map(Number);
   const d = new Date(startTime);
   d.setHours(h, m, 0, 0);
@@ -2425,6 +2471,12 @@ function fixedAt(p, startTime) {
 }
 
 function windowsFor(p, startTime) {
+  // Check-in：几点起才能入住（早到要等，晚到没关系）
+  if (p.checkin && p.fixedTime) {
+    const [h, m] = p.fixedTime.split(':').map(Number);
+    const day0 = startOfDay(startTime);
+    return [[day0 + (h * 60 + m) * 60e3, day0 + 24 * 3600e3]];
+  }
   if (p.fixedTime) return null; // 自己定了时间：不管营业时间
   const day0 = startOfDay(startTime);
   const h = placeHoursOn(p, new Date(startTime));
@@ -3066,7 +3118,8 @@ function renderMap() {
     const navName = NAV_APPS[state.navApp || 'google'];
     html += `<button type="button" class="nav-all">${ic('route', 18)}<span>${state.navApp && state.navApp !== 'google' ? `用 ${navName} 导航到下一站` : `用 Google Maps 导航${isMulti(t) ? '这天' : ''}全程`}</span>${ic('chevron', 16)}</button>`;
     const o = plan.origin;
-    html += `<div class="endpoint"><div class="tl-time tl-edit${T().dayDepart?.[manualKey(isMulti(t) ? t.curDay : null)] ? ' fixed' : ''}" data-daytime="1" title="改出发时间"><b>${fmtClock(plan.startTime)}</b><i>${ic('edit', 11)}</i></div><div class="tl-rail"><div class="ep-dot">${ic(o?.kind === 'home' ? 'bed' : o?.kind === 'done' ? 'check' : 'pin', 15)}</div></div><div class="ep-text">${o ? esc(o.name) : '从第一站开始'}<span>出发</span></div></div>`;
+    const tips = hotelTips(t, plan);
+    html += `<div class="endpoint${tips.out ? ' has-tip' : ''}"><div class="tl-time tl-edit${T().dayDepart?.[manualKey(isMulti(t) ? t.curDay : null)] ? ' fixed' : ''}" data-daytime="1" title="改出发时间"><b>${fmtClock(plan.startTime)}</b><i>${ic('edit', 11)}</i></div><div class="tl-rail"><div class="ep-dot">${ic(o?.kind === 'home' ? 'bed' : o?.kind === 'done' ? 'check' : 'pin', 15)}</div></div><div class="ep-text">${o ? esc(o.name) : '从第一站开始'}<span>出发</span>${tips.out || ''}</div></div>`;
   }
   const planned = plan ? plan.order.filter((id) => info.has(id)) : [];
   const sun = sunForPlan(t, plan);
@@ -3080,9 +3133,11 @@ function renderMap() {
     else if (st.flag === 'short') note = `<div class="note warn">${ic('clock', 14)} ${fmtClock(st.closeAt)} 关门，只能待 ${fmtDur(st.closeAt - st.start)}</div>`;
     else if (st.flag === 'late') note = `<div class="note warn">${ic('clock', 14)} 比你定的 ${fmtClock(st.fixed)} 晚 ${fmtDur(st.arrive - st.fixed)} 到（前面太赶，可以改晚一点或少停留）</div>`;
     if (st.wait > (st.fixed ? 10 : 1) * 60e3) {
-      note += st.fixed
-        ? `<div class="note ok">${ic('clock', 14)} 早到 ${fmtDur(st.wait)}，可以在附近走走（你定 ${fmtClock(st.fixed)} 开始）</div>`
-        : `<div class="note warn">${ic('clock', 14)} 要等 ${fmtDur(st.wait)} 才开门</div>`;
+      note += p.checkin
+        ? `<div class="note warn">${ic('clock', 14)} ${esc(p.fixedTime)} 才能入住，早到 ${fmtDur(st.wait)}：可以先寄放行李</div>`
+        : st.fixed
+          ? `<div class="note ok">${ic('clock', 14)} 早到 ${fmtDur(st.wait)}，可以在附近走走（你定 ${fmtClock(st.fixed)} 开始）</div>`
+          : `<div class="note warn">${ic('clock', 14)} 要等 ${fmtDur(st.wait)} 才开门</div>`;
     }
     const closedNow = st.flag === 'closed';
     html += `<div class="stop ${i.cls}" data-id="${id}">
@@ -3093,7 +3148,7 @@ function renderMap() {
           <div class="si-thumb sm" data-prev="${planned.indexOf(id)}">${kindIcon(p.kind)}</div>
           <div class="body">
             <div class="name">${esc(p.name)}</div>
-            <div class="chips-row">${p.fixedTime ? `<span class="chip fix-chip" data-act="time">${ic('pinned', 12)} 固定 ${esc(p.fixedTime)}</span>` : ''}${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}${sunChip(p, st, sun)}</div>
+            <div class="chips-row">${p.fixedTime ? `<span class="chip fix-chip" data-act="time">${ic('pinned', 12)} ${p.checkin ? `${esc(p.fixedTime)} 起入住` : `固定 ${esc(p.fixedTime)}`}</span>` : ''}${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}${sunChip(p, st, sun)}</div>
             <div class="hours">${hoursLine(p)}</div>
           </div>
         </div>
@@ -3106,9 +3161,12 @@ function renderMap() {
         </div>
       </div></div>`;
   }
+  if (planned.length && !plan.end && isMulti(t) && t.curDay === t.days && !endHotel(t, t.curDay)) {
+    html += `<div class="last-day-note">${ic('check', 14)} 最后一天：退房后玩完就结束，不用回酒店</div>`;
+  }
   if (plan?.end && planned.length) {
     html += legHtml(plan.legs[plan.legs.length - 1]);
-    html += `<div class="endpoint last"><div class="tl-time tl-edit" data-daytime="1" title="改时间"><b>${fmtClock(plan.endArrive)}</b><i>${ic('edit', 11)}</i></div><div class="tl-rail"><div class="ep-dot">${ic('bed', 15)}</div></div><div class="ep-text">${esc(plan.end.name)}<span>回到住的地方</span></div></div>`;
+    html += `<div class="endpoint last"><div class="tl-time tl-edit" data-daytime="1" title="改时间"><b>${fmtClock(plan.endArrive)}</b><i>${ic('edit', 11)}</i></div><div class="tl-rail"><div class="ep-dot">${ic('bed', 15)}</div></div><div class="ep-text">${esc(plan.end.name)}<span>${hotelTips(t, plan).in ? '入住' : '回到住的地方'}</span>${hotelTips(t, plan).in || ''}</div></div>`;
   }
   const closedIds = plan?.closedIds || [];
   const closed = active.filter((p) => closedIds.includes(p.id));
@@ -3560,7 +3618,10 @@ function renderOverview(t) {
             const a = startHotel(t, d);
             const b = endHotel(t, d);
             if (!a && !b) return '';
-            return `<span class="dc-hotel">${ic('bed', 13)} ${sameHotel(a, b) ? esc(a.name) : `${esc(a?.name || '—')} → ${esc(b?.name || '—')}`}</span>`;
+            if (a && !b) return `<span class="dc-hotel">${ic('bed', 13)} ${esc(a.name)} · ${esc(checkOutOf(a))} 前退房，不用回酒店</span>`;
+            if (sameHotel(a, b)) return `<span class="dc-hotel">${ic('bed', 13)} ${esc(a.name)}</span>`;
+            return `<span class="dc-hotel">${ic('bed', 13)} ${esc(a?.name || '—')} → ${esc(b?.name || '—')}</span>
+              <span class="dc-hotel dc-swap">${a ? `${esc(checkOutOf(a))} 前退房` : ''}${a && b ? ' · ' : ''}${b ? `${esc(checkInOf(b))} 起入住新酒店` : ''}</span>`;
           })()}
           ${ticketTotal(t, d) ? `<span class="dc-hotel">${ic('ticket', 13)} 门票约 ${esc(money(t, ticketTotal(t, d)))}（${t.people || 1} 人）</span>` : ''}</div>
         <span class="dc-go">看路线 ›</span>
@@ -4051,6 +4112,38 @@ function dayBarHtml(t, plan, compact = false) {
     ${compact ? '' : `<div class="db-scale"><span>${fmtClock(t0)} 出发</span><span class="db-legend"><i class="db-visit"></i>逛 <i class="db-car"></i>开车 <i class="db-foot"></i>走路</span><span>${fmtClock(t1)} ${plan.end ? '回到住处' : '结束'}</span></div>`}
     ${stats ? `<div class="db-stats">${stats}</div>` : ''}
   </div>`;
+}
+
+/* ---- 换酒店那天：退房、入住时间（只是提醒，不硬性排） ---- */
+
+const hmOn = (ms, hm) => {
+  const [h, m] = hm.split(':').map(Number);
+  const d = new Date(ms);
+  d.setHours(h, m, 0, 0);
+  return d.getTime();
+};
+function hotelTips(t, plan) {
+  const out = {};
+  if (!isMulti(t) || !t.curDay || !plan) return out;
+  const d = t.curDay;
+  const a = startHotel(t, d);
+  const b = endHotel(t, d);
+  // 今天要离开原本的酒店（换酒店、或最后一天）
+  if (a && d > 1 && (!b || !sameHotel(a, b))) {
+    const co = hmOn(plan.startTime, checkOutOf(a));
+    out.out = plan.startTime > co
+      ? `<em class="hotel-tip warn">${ic('alert', 12)} ${esc(checkOutOf(a))} 要退房，但 ${fmtClock(plan.startTime)} 才出发：记得先退房（行李放车上）</em>`
+      : `<em class="hotel-tip">${ic('bed', 12)} 今天退房 · ${esc(checkOutOf(a))} 前（行李带上车）</em>`;
+  }
+  // 今晚住新的酒店（第一天，或换酒店）
+  if (b && plan.end && (d === 1 || !a || !sameHotel(a, b))) {
+    const ci = hmOn(plan.startTime, checkInOf(b));
+    const arrive = plan.endArrive ?? plan.finish;
+    out.in = arrive < ci
+      ? `<em class="hotel-tip warn">${ic('clock', 12)} ${esc(checkInOf(b))} 才能入住（约 ${fmtClock(arrive)} 到）：可以先寄放行李，或多逛一下</em>`
+      : `<em class="hotel-tip ok">${ic('check', 12)} ${esc(checkInOf(b))} 起可以入住 ✓</em>`;
+  }
+  return out;
 }
 
 /* ---- 关门 / 休息的地方：告诉你哪一天有开，一键换过去 ---- */
@@ -4743,7 +4836,8 @@ $('#fhVoice').addEventListener('click', () => {
   else window.speechSynthesis?.cancel();
   toast(voiceOn() ? '语音提醒：开' : '语音提醒：关');
 });
-const shortName = (p) => (p?.name || '').split(' ')[0];
+// 「极乐寺 Kek Lok Si」→「极乐寺」；英文名字（Hard Rock Hotel）就整个用
+const shortName = (p) => (hasCJK((p?.name || '').split(' ')[0]) ? p.name.split(' ')[0] : p?.name || '');
 
 let follow = null; // { watch, center, last, speed, eta, etaAt, said:Set }
 function startFollow() {
@@ -5504,7 +5598,7 @@ function openDayTimeDialog() {
   $('#tmHint').textContent = '改了会按新的时间重新排这天的路线。';
   $('#tmRows').innerHTML =
     timeRow('tmA', '几点出发', t.dayDepart?.[key] || (plan ? fmtClock(plan.startTime) : t.settings.departAt)) +
-    (hotel ? timeRow('tmB', '酒店 Check-in', ci?.fixedTime || '', `中途回「${esc(shortName(hotel))}」办入住、放行李就填；不用就留空`) : '');
+    (hotel ? timeRow('tmB', '酒店 Check-in', ci?.fixedTime || '', `中途回「${esc(shortName(hotel))}」办入住、放行李就填（这间 ${esc(checkInOf(hotel))} 起可以入住）；不用就留空`) : '');
   $('#tmClear').hidden = !(t.dayDepart?.[key] || ci);
   $('#timeDialog').showModal();
 }
