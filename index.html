@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-  <meta name="theme-color" content="#0b1220">
+  <meta name="theme-color" content="#f4f7ff">
+  <meta name="color-scheme" content="light only">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -17,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- 所有文件都放在同一层（没有文件夹），上传 GitHub 比较方便。改了 style.css / app.js 就把 v= 加一，手机才会拿到新版 -->
-  <link rel="stylesheet" href="style.css?v=16">
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
 
@@ -29,16 +30,30 @@
       <div class="hero">
         <div class="hero-inner">
           <svg class="hero-route" viewBox="0 0 320 120" aria-hidden="true">
-            <path class="hr-path" d="M14 96 C 70 30, 110 110, 160 62 S 250 14, 304 40"/>
+            <path id="hrPath" class="hr-path" d="M14 96 C 70 30, 110 110, 160 62 S 250 14, 304 40"/>
             <g class="hr-pin" style="--d:0s"><circle cx="14" cy="96" r="7"/></g>
             <g class="hr-pin" style="--d:.6s"><circle cx="160" cy="62" r="7"/></g>
             <g class="hr-pin" style="--d:1.2s"><circle cx="304" cy="40" r="7"/></g>
+            <!-- 沿着路线飞的小飞机 -->
+            <g class="hr-plane">
+              <path d="M-9 -1.3h5.5L-.5 -7h2.6l-1.8 5.7H6c1.4 0 2.6.6 2.6 1.3S7.4 1.3 6 1.3H.3L2.1 7H-.5L-3.5 1.3H-9l-1.6 2.4h-1.6l.9-3.7-.9-3.7h1.6Z"/>
+              <animateMotion dur="7s" repeatCount="indefinite" rotate="auto" keyPoints="0;1" keyTimes="0;1" calcMode="linear"><mpath href="#hrPath"/></animateMotion>
+            </g>
           </svg>
+          <!-- 飘来飘去的小标签 -->
+          <div class="hero-floats" aria-hidden="true">
+            <span style="top:46px;right:22px;--d:0s">🏝️ 海边</span>
+            <span style="bottom:30px;right:16px;--d:-2.2s">🍜 美食</span>
+          </div>
           <div class="brand"><img src="icon.svg" alt=""> 顺路</div>
-          <h1>今天要去哪里？</h1>
+          <h1>今天要去<span class="rot-wrap"><span id="heroWord" class="rot">哪里</span></span>？</h1>
           <p>选好想去的地方，帮你分好每一天、排出最顺的路线，还会建议住哪一区最方便。</p>
           <button id="btnNewTrip" class="btn-hero"><span data-ic="plus"></span>开始规划新行程</button>
         </div>
+      </div>
+      <!-- 一直慢慢滑过的热门城市：按一下就用这个城市开始 -->
+      <div class="dest-marquee" aria-label="热门城市">
+        <div class="dm-track" id="destMarquee"></div>
       </div>
 
       <div class="home-body">
@@ -327,6 +342,7 @@
       <label>名字<input id="pdName" required></label>
       <div class="muted small" id="pdAddress"></div>
       <label>停留时间（分钟）<input id="pdStay" type="number" min="0" step="5" inputmode="numeric"></label>
+      <label>固定几点开始（不填 = 自动排）<input id="pdFixed" type="time"></label>
       <div class="chips" id="pdStayChips">
         <button type="button" data-v="15">15</button><button type="button" data-v="30">30</button>
         <button type="button" data-v="60">60</button><button type="button" data-v="90">90</button>
@@ -465,6 +481,21 @@
     </div>
   </dialog>
 
+  <!-- 改时间：某个地点几点去 / 这天几点出发、酒店 Check-in -->
+  <dialog id="timeDialog">
+    <div class="pk-box">
+      <div class="ml-ic si-ic2" data-ic="clock"></div>
+      <h3 id="tmTitle">改时间</h3>
+      <p class="small muted" id="tmHint"></p>
+      <div id="tmRows" class="tm-rows"></div>
+      <div class="dialog-actions">
+        <button type="button" id="tmClear" class="danger">恢复自动</button>
+        <button type="button" id="tmCancel">取消</button>
+        <button type="button" id="tmOk" class="primary">确定，重新排</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- 一次贴上很多地点 -->
   <dialog id="bulkDialog">
     <div class="pk-box">
@@ -498,6 +529,6 @@
   <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script type="module" src="app.js?v=16"></script>
+  <script type="module" src="app.js?v=17"></script>
 </body>
 </html>

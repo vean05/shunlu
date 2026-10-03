@@ -8,6 +8,7 @@
 //   stay[k],               第 k 个地点（1..n）停留时间（毫秒）
 //   windows[k],            第 k 个地点营业窗口 [[openMs, closeMs], ...]，null = 不知道（当作一直开）
 //   hasEnd,                是否要回到终点
+//   fixed[k],              （可选）用户自己定的开始时间（毫秒），例如「11:00 才去」；早到就等，晚到加罚分
 //   meals,                 （可选）吃饭 [{ kind, start, dur }]，start 是想开始吃的时间
 //   deadline,              （可选）最晚要到终点的时间（例如赶飞机），超过会加很重的罚分
 // }
@@ -17,11 +18,27 @@
 
 const CLOSED_PENALTY = 4 * 3600e3; // 到达时已关门：相当于多花 4 小时
 const SHORT_FACTOR = 3; // 关门前玩不完：每少 1 分钟算 3 分钟
+const FIXED_LATE = 4; // 比自己定的时间晚到：每晚 1 分钟算 4 分钟
+const FIXED_OK = 5 * 60e3; // 晚 5 分钟内不算晚
 
 export function visit(ctx, k, t) {
   const stay = ctx.stay[k];
   const w = ctx.windows[k];
   const res = { arrive: t, start: t, depart: t + stay, wait: 0, penalty: 0, flag: null, win: null };
+  // 自己定了几点去：照用户的时间（不管营业时间）
+  const fx = ctx.fixed?.[k];
+  if (fx != null) {
+    res.fixed = fx;
+    if (t < fx) {
+      res.wait = fx - t;
+      res.start = fx;
+      res.depart = fx + stay;
+    } else if (t > fx + FIXED_OK) {
+      res.penalty = (t - fx) * FIXED_LATE;
+      res.flag = 'late';
+    }
+    return res;
+  }
   if (!w) return res;
   const win = w.find(([, c]) => c > t);
   if (!win) {

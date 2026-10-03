@@ -51,7 +51,8 @@ const P = {
   grip: '<circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/>',
   clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M8 12h8M8 16h5"/>',
   sunset: '<path d="M12 10V2M8.5 5.5 12 2l3.5 3.5M4.2 10.2l1.4 1.4M1 18h2M21 18h2M18.4 11.6l1.4-1.4M23 22H1M16 18a4 4 0 0 0-8 0"/>',
-  phoneApp: '<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>',
+  pinned: '<path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3Z"/>',
+  phoneApp:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>',
 };
 
 // 交通方式的实心图标（地图上、路线列表用，要够显眼）

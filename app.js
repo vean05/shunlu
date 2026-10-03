@@ -1,9 +1,9 @@
-import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=16';
-import { optimize, evaluate } from './optimizer.js?v=16';
-import { arrangeDays } from './days.js?v=16';
-import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=16';
-import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=16';
-import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=16';
+import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=17';
+import { optimize, evaluate } from './optimizer.js?v=17';
+import { arrangeDays } from './days.js?v=17';
+import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=17';
+import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=17';
+import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=17';
 
 /* ================= 状态与保存 ================= */
 
@@ -380,6 +380,44 @@ $('#tplList').addEventListener('click', (e) => {
   if (b) useTemplate(TEMPLATES[Number(b.dataset.tpl)]);
 });
 
+/* ---- 首页：会动的标题、慢慢滑过的热门城市 ---- */
+
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+(function heroWord() {
+  const words = ['哪里', '槟城', '东京', '曼谷', '首尔', '新加坡', '台北', '大阪', '吉隆坡'];
+  const el = $('#heroWord');
+  if (reduceMotion) return;
+  let i = 0;
+  setInterval(() => {
+    if (currentView !== 'trips' || document.hidden) return;
+    el.classList.add('out');
+    setTimeout(() => {
+      i = (i + 1) % words.length;
+      el.textContent = words[i];
+      el.classList.remove('out');
+      el.classList.add('in');
+      requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('in')));
+    }, 320);
+  }, i === 0 ? 2600 : 2200);
+})();
+
+(function destMarquee() {
+  const chip = (c, i) => `<button type="button" class="dm-chip" data-mq="${i}"><span>${c.flag || '🌏'}</span>${esc(c.name)}<small>${esc(c.sub)}</small></button>`;
+  const html = CITY_PRESETS.map(chip).join('');
+  // 两份接在一起，滑到一半刚好接回开头（看起来不会断）
+  $('#destMarquee').innerHTML = html + html;
+})();
+$('#destMarquee').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mq]');
+  if (!b) return;
+  const t = newTrip();
+  state.trips.push(t);
+  state.currentId = t.id;
+  save();
+  openSetup({ edit: false, step: 1 });
+  chooseDest(CITY_PRESETS[Number(b.dataset.mq)]);
+});
+
 /* ---- 首页：教用户装到手机桌面 ---- */
 
 const INSTALL_KEY = 'shunlu:install-x';
@@ -586,11 +624,33 @@ function createSearch(root, opts) {
   });
   input.addEventListener('input', () => !composing && onType());
   input.addEventListener('keyup', () => !composing && onType());
+  // 一次打很多个地方（用逗号、顿号、分号分开）：建议只看最后一个
+  const MULTI_SEP = /[，,、;；|\n]+/;
+  const segments = () => input.value.split(MULTI_SEP).map((x) => x.trim()).filter(Boolean);
+  // 地址（「10 Lebuh Farquhar, George Town」）、链接、坐标本来就有逗号：当一个地方
+  const ADDR = /jalan|lebuh|lorong|road|street|\brd\b|\bst\b|ave|路|街|号|丁目/i;
+  const AREA = /^(malaysia|singapore|thailand|japan|korea|taiwan|penang|pulau pinang|george ?town|kuala lumpur|melaka|malacca|马来西亚|新加坡|泰国|日本|韩国|台湾|槟城|吉隆坡|马六甲)$/i;
+  const isMultiInput = () => {
+    const v = input.value.trim().replace(/[，,、;；|\s]+$/, '');
+    if (!MULTI_SEP.test(v) || /https?:\/\//.test(v) || parseCoords(v) || (/\d/.test(v) && ADDR.test(v))) return false;
+    // 「Penang Hill, Penang」后面那段只是地区：也当一个地方
+    return placeSegs().length >= 2;
+  };
+  function placeSegs() {
+    return segments().filter((x) => !AREA.test(x) && nameKey(x) !== nameKey(T()?.dest?.name));
+  }
   function onType() {
-    const q = input.value.trim();
-    if (q === lastQ) return;
-    lastQ = q;
+    const full = input.value.trim();
+    if (full === lastQ) return;
+    lastQ = full;
     clearTimeout(timer);
+    const multi = isMultiInput() || /[，,、;；|]\s*$/.test(full);
+    const q = multi ? (/[，,、;；|]\s*$/.test(full) ? '' : segments().at(-1) || '') : full;
+    if (multi && q.length < 2) {
+      results = [];
+      showMsg(`${placeSegs().length} 个地方 · 按「搜索」一次全部找出来`, '');
+      return;
+    }
     if (q.length < 2) {
       results = [];
       showMsg('', '');
@@ -604,7 +664,9 @@ function createSearch(root, opts) {
         approx = null;
         results = r;
         head.hidden = false;
-        head.textContent = r.length ? '建议（点照片看大图；地址或中文名找不到就按「搜索」）' : '';
+        head.textContent = r.length
+          ? multi ? `「${q}」的建议 · 按「搜索」就一次找全部 ${placeSegs().length} 个` : '建议（点照片看大图；地址或中文名找不到就按「搜索」）'
+          : '';
         if (r.length) draw();
         else showMsg('', '没有建议，按「搜索」试试');
       } catch (e) {
@@ -621,6 +683,19 @@ function createSearch(root, opts) {
     if (!q) return;
     input.blur();
     const my = ++seq;
+    // 很多个地方：一个一个找，再一次确认
+    const items = isMultiInput() ? parseBulk(q.split(MULTI_SEP).filter((x) => !AREA.test(x.trim())).join('\n')) : [];
+    if (items.length >= 2) {
+      const res = await runBulk(items, (msg) => showMsg(msg, ''), () => my === seq);
+      if (!res) return;
+      const msg = offerBulk(res, opts.bulkAfter);
+      showMsg('', msg ? esc(msg) : '');
+      if (!msg) {
+        input.value = '';
+        lastQ = '';
+      }
+      return;
+    }
     showMsg('搜索中…', '');
     try {
       const res = await smartSearch(q, opts.bbox?.(), opts.near?.());
@@ -651,6 +726,10 @@ function createSearch(root, opts) {
     const pick = e.target.closest('button[data-pick]');
     if (pick) {
       opts.onPick(results[Number(pick.dataset.pick)]);
+      if (isMultiInput()) {
+        input.value = `${segments().slice(0, -1).join('，')}，`;
+        lastQ = input.value.trim();
+      }
       draw();
       return;
     }
@@ -1365,7 +1444,7 @@ $('#pickClear').addEventListener('click', () => {
 });
 
 const placeSearch = createSearch($('#placeSearch'), {
-  placeholder: '地名、地址、Google Maps 链接都可以',
+  placeholder: '地名、地址、链接；多个用逗号分开',
   near: searchCenter,
   nearLabel: () => (T()?.home ? '离住的地方' : '离市中心'),
   bbox: cityBbox,
@@ -2143,12 +2222,14 @@ function departTime(t, day = null) {
   // 已经去过地方：接着那个地方的离开时间（提前规划时）或现在（真的在路上时）
   const last = live ? lastDonePlace(t, day) : null;
   if (last) return Math.max(now, last.doneDepart || 0);
+  // 这天自己改过出发时间（地图页按出发时间改的）
+  const over = t.dayDepart?.[manualKey(day)];
   if (day != null) {
-    const base = dayClock(t, day, s.departAt);
-    return live && s.departMode === 'now' ? Math.max(now, base) : live ? Math.max(base, Math.min(now, base + 12 * 3600e3)) : base;
+    const base = dayClock(t, day, over || s.departAt);
+    return live && s.departMode === 'now' && !over ? Math.max(now, base) : live ? Math.max(base, Math.min(now, base + 12 * 3600e3)) : base;
   }
-  if (s.departMode !== 'at' || !s.departAt) return now;
-  const [h, m] = s.departAt.split(':').map(Number);
+  if (!over && (s.departMode !== 'at' || !s.departAt)) return now;
+  const [h, m] = (over || s.departAt).split(':').map(Number);
   const d = new Date();
   d.setHours(h, m, 0, 0);
   if (d.getTime() < now - 5 * 60e3) d.setDate(d.getDate() + 1);
@@ -2334,7 +2415,17 @@ function parkWalkLegs({ pts, placeIdx, originIdx, endIdx, walk, drive, walkMax }
 
 
 // 某天的营业时间窗口（绝对时间）
+// 自己定的时间（例如「11:00 去」）→ 那一天几点的时间戳
+function fixedAt(p, startTime) {
+  if (!p.fixedTime) return null;
+  const [h, m] = p.fixedTime.split(':').map(Number);
+  const d = new Date(startTime);
+  d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+
 function windowsFor(p, startTime) {
+  if (p.fixedTime) return null; // 自己定了时间：不管营业时间
   const day0 = startOfDay(startTime);
   const h = placeHoursOn(p, new Date(startTime));
   return h.known ? h.windows.map(([o, c]) => [day0 + o * 60e3, day0 + c * 60e3]) : null;
@@ -2377,7 +2468,7 @@ async function buildDayBundle(trip, day, { quiet = false } = {}) {
   const closedIds = active
     .filter((p) => {
       const h = placeHoursOn(p, planDate);
-      return h.known && !h.windows.length;
+      return !p.fixedTime && h.known && !h.windows.length;
     })
     .map((p) => p.id);
   const remaining = active.filter((p) => !closedIds.includes(p.id));
@@ -2419,7 +2510,8 @@ async function buildDayBundle(trip, day, { quiet = false } = {}) {
   };
   const stay = [0, ...remaining.map((p) => (Number(p.stayMin) || 0) * 60e3)];
   const windows = [null, ...remaining.map((p) => windowsFor(p, startTime))];
-  const ctx = { n, travel: (a, b) => legOf(a, b)?.dur ?? 0, startTime, stay, windows, hasEnd: !!end };
+  const fixed = [null, ...remaining.map((p) => fixedAt(p, startTime))];
+  const ctx = { n, travel: (a, b) => legOf(a, b)?.dur ?? 0, startTime, stay, windows, fixed, hasEnd: !!end };
   const best = optimize(ctx);
   const baseline = evaluate(ctx, remaining.map((_, i) => i + 1));
   return { trip, day, ctx, legOf, leg, walk, ov, idx, pts, remaining, end, n, origin, startTime, estimated, closedIds, best, baseline };
@@ -2510,6 +2602,7 @@ function planFromOrder(b, order, manual) {
     wait: st.wait,
     flag: st.flag,
     closeAt: st.win ? st.win[1] : null,
+    fixed: st.fixed ?? null,
   }));
   const finish = res.endArrive ?? res.finish;
   const bestFinish = best.endArrive ?? best.finish;
@@ -2604,7 +2697,7 @@ async function arrangeTrip(trip) {
     if (!ks.length) return places.length >= N ? 5 * 3600e3 : 0;
     const day = d + 1;
     const { start, end } = dayHubs[d];
-    const startTime = dayClock(trip, day, s.departAt);
+    const startTime = dayClock(trip, day, trip.dayDepart?.[manualKey(day)] || s.departAt);
     // 节点：0 = 起点酒店，1..n = 地点，n+1 = 终点酒店
     const at = (node) => (node === 0 ? start : node === ks.length + 1 ? end : base + ks[node - 1]);
     const ctx = {
@@ -2617,6 +2710,7 @@ async function arrangeTrip(trip) {
       startTime,
       stay: [0, ...ks.map((k) => (Number(places[k].stayMin) || 0) * 60e3)],
       windows: [null, ...ks.map((k) => windowsFor(places[k], startTime))],
+      fixed: [null, ...ks.map((k) => fixedAt(places[k], startTime))],
       hasEnd: end >= 0,
     };
     const res = optimize(ctx);
@@ -2833,7 +2927,7 @@ function stopInfoMap() {
   plan.stops.forEach((st, i) => {
     const p = t.places.find((x) => x.id === st.id);
     if (!p || p.done) return;
-    const cls = st.flag === 'closed' ? 'bad' : st.flag === 'short' ? 'warn' : '';
+    const cls = st.flag === 'closed' ? 'bad' : st.flag === 'short' || st.flag === 'late' ? 'warn' : '';
     m.set(st.id, { num: ++num, cls, st, legIn: plan.legs[i] });
   });
   return m;
@@ -2948,7 +3042,7 @@ function renderMap() {
     const warnN = plan.stops.filter((x) => x.flag).length + (plan.closedIds?.length || 0);
     $('#summary').innerHTML =
       `${plan.stops.length} 个地点 · ${fmtClock(plan.startTime)} 出发 · 约 ${fmtClock(plan.endArrive ?? plan.finish)} 结束` +
-      `<div class="small muted">${wxChip(weatherOn(t, isMulti(t) ? t.curDay : null))}${sunMini(t, plan)} 路上共 ${fmtDur(travel)}` +
+      `<div class="small muted">${wxChip(weatherOn(t, isMulti(t) ? t.curDay : null))}${sunMini(t, plan)} <span class="nw">路上共 ${fmtDur(travel)}</span>` +
       (plan.manual
         ? ` · <span class="badge">你的顺序</span>${plan.extra > 60e3 ? ` 比最优路线多 ${fmtDur(plan.extra)}` : ' 已经是最省时间的'}`
         : plan.saved > 60e3 ? ` · 比按添加顺序省 ${fmtDur(plan.saved)}` : '') +
@@ -2972,7 +3066,7 @@ function renderMap() {
     const navName = NAV_APPS[state.navApp || 'google'];
     html += `<button type="button" class="nav-all">${ic('route', 18)}<span>${state.navApp && state.navApp !== 'google' ? `用 ${navName} 导航到下一站` : `用 Google Maps 导航${isMulti(t) ? '这天' : ''}全程`}</span>${ic('chevron', 16)}</button>`;
     const o = plan.origin;
-    html += `<div class="endpoint"><div class="tl-time"><b>${fmtClock(plan.startTime)}</b></div><div class="tl-rail"><div class="ep-dot">${ic(o?.kind === 'home' ? 'bed' : o?.kind === 'done' ? 'check' : 'pin', 15)}</div></div><div class="ep-text">${o ? esc(o.name) : '从第一站开始'}<span>出发</span></div></div>`;
+    html += `<div class="endpoint"><div class="tl-time tl-edit${T().dayDepart?.[manualKey(isMulti(t) ? t.curDay : null)] ? ' fixed' : ''}" data-daytime="1" title="改出发时间"><b>${fmtClock(plan.startTime)}</b><i>${ic('edit', 11)}</i></div><div class="tl-rail"><div class="ep-dot">${ic(o?.kind === 'home' ? 'bed' : o?.kind === 'done' ? 'check' : 'pin', 15)}</div></div><div class="ep-text">${o ? esc(o.name) : '从第一站开始'}<span>出发</span></div></div>`;
   }
   const planned = plan ? plan.order.filter((id) => info.has(id)) : [];
   const sun = sunForPlan(t, plan);
@@ -2984,17 +3078,22 @@ function renderMap() {
     let note = '';
     if (st.flag === 'closed') note = `<div class="note bad closed-note">${ic('alert', 14)} ${fmtClock(st.arrive)} 到的时候已经关门，建议跳过或改天</div>${moveDayBtns(t, p)}`;
     else if (st.flag === 'short') note = `<div class="note warn">${ic('clock', 14)} ${fmtClock(st.closeAt)} 关门，只能待 ${fmtDur(st.closeAt - st.start)}</div>`;
-    if (st.wait > 60e3) note += `<div class="note warn">${ic('clock', 14)} 要等 ${fmtDur(st.wait)} 才开门</div>`;
+    else if (st.flag === 'late') note = `<div class="note warn">${ic('clock', 14)} 比你定的 ${fmtClock(st.fixed)} 晚 ${fmtDur(st.arrive - st.fixed)} 到（前面太赶，可以改晚一点或少停留）</div>`;
+    if (st.wait > (st.fixed ? 10 : 1) * 60e3) {
+      note += st.fixed
+        ? `<div class="note ok">${ic('clock', 14)} 早到 ${fmtDur(st.wait)}，可以在附近走走（你定 ${fmtClock(st.fixed)} 开始）</div>`
+        : `<div class="note warn">${ic('clock', 14)} 要等 ${fmtDur(st.wait)} 才开门</div>`;
+    }
     const closedNow = st.flag === 'closed';
     html += `<div class="stop ${i.cls}" data-id="${id}">
-      <div class="tl-time"><b>${fmtClock(closedNow ? st.arrive : st.start)}</b>${closedNow ? '' : `<span>${fmtClock(st.depart)}</span>`}</div>
+      <div class="tl-time tl-edit ${p.fixedTime ? 'fixed' : ''}" data-act="time" title="改时间"><b>${fmtClock(closedNow ? st.arrive : st.start)}</b>${closedNow ? '' : `<span>${fmtClock(st.depart)}</span>`}<i>${ic(p.fixedTime ? 'pinned' : 'edit', 11)}</i></div>
       <div class="tl-rail"><div class="num">${i.num}</div></div>
       <div class="tl-card">
         <div class="tl-top" data-act="edit">
           <div class="si-thumb sm" data-prev="${planned.indexOf(id)}">${kindIcon(p.kind)}</div>
           <div class="body">
             <div class="name">${esc(p.name)}</div>
-            <div class="chips-row">${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}${sunChip(p, st, sun)}</div>
+            <div class="chips-row">${p.fixedTime ? `<span class="chip fix-chip" data-act="time">${ic('pinned', 12)} 固定 ${esc(p.fixedTime)}</span>` : ''}${closedNow ? '' : `<span class="chip">${ic('clock', 12)} 停留 ${fmtDur(st.depart - st.start)}</span>`}${parkHere(i.legIn, planned[planned.indexOf(id) + 1]) ? '<span class="chip park-chip">P 车停这里，走路逛附近</span>' : ''}${legKind(i.legIn) === 'car' && !visibleParkIds().has(id) ? '<span class="chip park-btn" data-act="parking">P 找停车场</span>' : ''}${sunChip(p, st, sun)}</div>
             <div class="hours">${hoursLine(p)}</div>
           </div>
         </div>
@@ -3009,7 +3108,7 @@ function renderMap() {
   }
   if (plan?.end && planned.length) {
     html += legHtml(plan.legs[plan.legs.length - 1]);
-    html += `<div class="endpoint last"><div class="tl-time"><b>${fmtClock(plan.endArrive)}</b></div><div class="tl-rail"><div class="ep-dot">${ic('bed', 15)}</div></div><div class="ep-text">${esc(plan.end.name)}<span>回到住的地方</span></div></div>`;
+    html += `<div class="endpoint last"><div class="tl-time tl-edit" data-daytime="1" title="改时间"><b>${fmtClock(plan.endArrive)}</b><i>${ic('edit', 11)}</i></div><div class="tl-rail"><div class="ep-dot">${ic('bed', 15)}</div></div><div class="ep-text">${esc(plan.end.name)}<span>回到住的地方</span></div></div>`;
   }
   const closedIds = plan?.closedIds || [];
   const closed = active.filter((p) => closedIds.includes(p.id));
@@ -3071,6 +3170,7 @@ $('#list').addEventListener('click', (e) => {
   else if (act === 'down') moveStop(p.id, 1);
   else if (act === 'undo') markDone(p.id, false);
   else if (act === 'moveday') movePlaceToDay(p, Number(actEl.dataset.day));
+  else if (act === 'time') openTimeDialog(p);
   else if (act === 'del') removePlace(p.id);
 });
 
@@ -3167,7 +3267,7 @@ function openNav(p) {
 /* 地图页：加地点 */
 let addedInDialog = 0;
 const addSearch = createSearch($('#addSearch'), {
-  placeholder: '地名、地址、Google Maps 链接都可以',
+  placeholder: '地名、地址、链接；多个用逗号分开',
   nearLabel: () => '离地图中心',
   near: () => {
     if (map) {
@@ -3281,7 +3381,9 @@ async function findBulkItem(it) {
   const pad = bbox ? Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1]) * 0.3 : 0;
   const inBox = (r) => !bbox || (r.lon >= bbox[0] - pad && r.lon <= bbox[2] + pad && r.lat >= bbox[1] - pad && r.lat <= bbox[3] + pad);
   const okKind = (r) => !/^(city|town|village|state|country|administrative|county|region|province|municipality|suburb)$/.test(r.kind || '');
-  const ok = (r) => r && inBox(r) && okKind(r) && nameKey(r.name).length >= 2;
+  // 车站、公交站：除非自己打的就是「…站」
+  const STOP = /bus_stop|platform|station|halt|stop_position|stop_area|tram_stop|subway_entrance/;
+  const ok = (r, q = '') => r && inBox(r) && okKind(r) && nameKey(r.name).length >= 2 && (!STOP.test(r.kind || '') || /站|station|stesen|terminal|sentral/i.test(q));
   // 输入建议是模糊搜索：名字要有一段连续相同（「双子塔」不能配到「双威金字塔」）
   const similar = (q, r) => [r.name, r.en, r.alt].some((n) => {
     const a = nameKey(q);
@@ -3305,10 +3407,10 @@ async function findBulkItem(it) {
     }));
     if (hit) return hit;
     const res = await smartSearch(q, bbox, near).catch(() => null);
-    const r1 = (res?.results || []).find((x) => ok(x) && similar(q, x));
+    const r1 = (res?.results || []).find((x) => ok(x, q) && similar(q, x));
     if (r1) return r1;
     const sug = await suggestPlaces(q, near, bbox).catch(() => []);
-    return sug.find((x) => ok(x) && similar(q, x)) || null;
+    return sug.find((x) => ok(x, q) && similar(q, x)) || null;
   };
   return (await tryName(it.q)) || (it.alt ? await tryName(it.alt) : null);
 }
@@ -3335,34 +3437,48 @@ $('#bulkCancel').addEventListener('click', () => {
   bulkRun++;
   $('#bulkDialog').close();
 });
+// 一个一个找（地图搜索每秒只能问一次）；返回 null = 中途取消了
+async function runBulk(items, progress, alive) {
+  const found = [];
+  const missing = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    progress(`正在找 ${i + 1}/${items.length}：${it.q || '链接'}…`);
+    const r = await findBulkItem(it).catch(() => null);
+    if (!alive()) return null;
+    if (r && !r.fail) {
+      if (!found.some((x) => samePlace(x, r))) found.push(r);
+    } else missing.push(r?.fail ? `链接 ${i + 1}（${r.fail}）` : it.q);
+  }
+  return { found, missing };
+}
+// 找到的放进「已选」，弹出确认；全部都没有新的就返回说明文字
+function offerBulk({ found, missing }, after) {
+  const fresh = found.filter((r) => !inTrip(r) && pickedIndex(r) < 0);
+  fresh.forEach((r) => picked.push(r));
+  refreshPickViews();
+  if (!fresh.length) return found.length ? '这些地点都已经在行程里了' : `一个都找不到：${missing.join('、')}`;
+  const already = found.length - fresh.length;
+  confirmPicked(after, `找到 ${fresh.length} 个地点${already ? `（另外 ${already} 个已在行程里）` : ''}，加入吗？`, missing);
+  return null;
+}
+
 $('#bulkGo').addEventListener('click', async () => {
   const items = parseBulk($('#bulkText').value);
   if (!items.length) return toast('没有认出地点名字，请一行一个，或用逗号分开');
   const my = ++bulkRun;
   $('#bulkGo').disabled = true;
-  const found = [];
-  const missing = [];
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i];
-    $('#bulkStatus').textContent = `正在找 ${i + 1}/${items.length}：${it.q || '链接'}…`;
-    const r = await findBulkItem(it).catch(() => null);
-    if (my !== bulkRun) return; // 按了取消
-    if (r && !r.fail) {
-      if (!found.some((x) => samePlace(x, r))) found.push(r);
-    } else missing.push(r?.fail ? `链接 ${i + 1}（${r.fail}）` : it.q);
-  }
+  const res = await runBulk(items, (msg) => ($('#bulkStatus').textContent = msg), () => my === bulkRun);
   $('#bulkGo').disabled = false;
-  const fresh = found.filter((r) => !inTrip(r) && pickedIndex(r) < 0);
-  fresh.forEach((r) => picked.push(r));
-  refreshPickViews();
-  if (!fresh.length) {
-    $('#bulkStatus').textContent = found.length ? '这些地点都已经在行程里了' : `一个都找不到：${missing.join('、')}`;
+  if (!res) return; // 按了取消
+  $('#bulkDialog').close();
+  const msg = offerBulk(res, bulkAfter);
+  if (msg) {
+    $('#bulkDialog').showModal();
+    $('#bulkStatus').textContent = msg;
     return;
   }
-  $('#bulkDialog').close();
   $('#bulkText').value = '';
-  const already = found.length - fresh.length;
-  confirmPicked(bulkAfter, `找到 ${fresh.length} 个地点${already ? `（另外 ${already} 个已在行程里）` : ''}，加入吗？`, missing);
 });
 
 /* ================= 多天：分页与总览 ================= */
@@ -3476,6 +3592,7 @@ function renderOverview(t) {
 
 $('#list').addEventListener('click', (e) => {
   if (e.target.closest('.nav-all')) return openNavAll();
+  if (e.target.closest('[data-daytime]')) return openDayTimeDialog();
   const mv = e.target.closest('[data-closedid] [data-act="moveday"]');
   if (mv) {
     const p = T().places.find((x) => x.id === mv.closest('[data-closedid]').dataset.closedid);
@@ -5350,6 +5467,116 @@ $('#btnCalendar').addEventListener('click', async () => {
   toast('已下载日历文件：打开它就会加进日历', 4000);
 });
 
+/* ================= 自己改时间：某个地点几点去、这天几点出发、酒店 Check-in ================= */
+
+let timeCtx = null; // { kind: 'stop', id } 或 { kind: 'day', day }
+
+function timeRow(id, label, value, sub = '') {
+  return `<div class="tm-row"><label for="${id}">${label}${sub ? `<small>${sub}</small>` : ''}</label>
+    <div class="tm-in"><input type="time" id="${id}" value="${esc(value || '')}">
+    <div class="tm-quick" data-for="${id}"><button type="button" data-shift="-30">−30分</button><button type="button" data-shift="30">+30分</button><button type="button" data-shift="60">+1小时</button></div></div></div>`;
+}
+
+function openTimeDialog(p) {
+  const t = T();
+  const st = t.plan?.stops.find((x) => x.id === p.id);
+  timeCtx = { kind: 'stop', id: p.id };
+  $('#tmTitle').textContent = `几点去「${shortName(p)}」？`;
+  $('#tmHint').textContent = '定好后会照这个时间去，其他地点自动排在前后；早到会提醒你，晚到会告诉你晚多少。';
+  $('#tmRows').innerHTML = timeRow('tmA', '开始时间', p.fixedTime || (st ? fmtClock(st.start) : ''));
+  $('#tmClear').hidden = !p.fixedTime;
+  $('#timeDialog').showModal();
+}
+
+// 这天住的酒店（Check-in 用）
+const checkinHotel = (t, day) => (isMulti(t) ? endHotel(t, day) : t.home);
+const checkinOf = (t, day) => t.places.find((p) => p.checkin && !p.done && (day == null || p.day === day));
+
+function openDayTimeDialog() {
+  const t = T();
+  const day = isMulti(t) ? t.curDay : null;
+  const key = manualKey(day);
+  const plan = t.plan;
+  timeCtx = { kind: 'day', day };
+  const hotel = checkinHotel(t, day);
+  const ci = checkinOf(t, day);
+  $('#tmTitle').textContent = day ? `第 ${day} 天的时间` : '这天的时间';
+  $('#tmHint').textContent = '改了会按新的时间重新排这天的路线。';
+  $('#tmRows').innerHTML =
+    timeRow('tmA', '几点出发', t.dayDepart?.[key] || (plan ? fmtClock(plan.startTime) : t.settings.departAt)) +
+    (hotel ? timeRow('tmB', '酒店 Check-in', ci?.fixedTime || '', `中途回「${esc(shortName(hotel))}」办入住、放行李就填；不用就留空`) : '');
+  $('#tmClear').hidden = !(t.dayDepart?.[key] || ci);
+  $('#timeDialog').showModal();
+}
+
+$('#tmRows').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-shift]');
+  if (!b) return;
+  const input = $(`#${b.parentElement.dataset.for}`);
+  const [h, m] = (input.value || '09:00').split(':').map(Number);
+  const v = Math.min(23 * 60 + 59, Math.max(0, h * 60 + m + Number(b.dataset.shift)));
+  input.value = `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+});
+
+function setCheckin(t, day, hhmm) {
+  const cur = checkinOf(t, day);
+  if (!hhmm) {
+    if (cur) t.places.splice(t.places.indexOf(cur), 1);
+    return;
+  }
+  const h = checkinHotel(t, day);
+  if (!h) return;
+  if (cur) {
+    Object.assign(cur, { fixedTime: hhmm, lat: h.lat, lon: h.lon });
+    return;
+  }
+  const p = makePlace({ name: `${h.name.split(' ')[0]} · Check-in`, address: h.address || '', lat: h.lat, lon: h.lon, kind: 'hotel', stayMin: 20 });
+  Object.assign(p, { needsDetails: false, checkin: true, fixedTime: hhmm, note: '办入住、放行李' });
+  if (day != null) Object.assign(p, { day, dayLocked: true });
+  t.places.push(p);
+}
+
+function afterTimeChange(msg) {
+  const t = T();
+  setManual(t, isMulti(t) ? t.curDay : null, null); // 时间变了：重新找最顺的顺序
+  save();
+  $('#timeDialog').close();
+  renderMap();
+  toast(msg, 3000);
+  replan();
+}
+
+$('#tmOk').addEventListener('click', () => {
+  const t = T();
+  if (!timeCtx) return;
+  if (timeCtx.kind === 'stop') {
+    const p = t.places.find((x) => x.id === timeCtx.id);
+    const v = $('#tmA').value;
+    if (!p || !v) return toast('请选一个时间');
+    p.fixedTime = v;
+    return afterTimeChange(`「${shortName(p)}」固定 ${v} 开始，重新排其他地点`);
+  }
+  const key = manualKey(timeCtx.day);
+  const a = $('#tmA').value;
+  t.dayDepart ||= {};
+  if (a) t.dayDepart[key] = a;
+  if ($('#tmB')) setCheckin(t, timeCtx.day, $('#tmB').value);
+  afterTimeChange(`${a ? `${a} 出发` : ''}${$('#tmB')?.value ? `，${$('#tmB').value} 回酒店 Check-in` : ''}，重新排路线`);
+});
+$('#tmClear').addEventListener('click', () => {
+  const t = T();
+  if (!timeCtx) return;
+  if (timeCtx.kind === 'stop') {
+    const p = t.places.find((x) => x.id === timeCtx.id);
+    if (p) p.fixedTime = null;
+    return afterTimeChange('已恢复自动安排时间');
+  }
+  if (t.dayDepart) delete t.dayDepart[manualKey(timeCtx.day)];
+  setCheckin(t, timeCtx.day, null);
+  afterTimeChange('已恢复原本的出发时间');
+});
+$('#tmCancel').addEventListener('click', () => $('#timeDialog').close());
+
 /* ================= 编辑地点 ================= */
 
 let editingId = null;
@@ -5365,6 +5592,7 @@ function openPlaceDialog(id) {
   $('#pdClosed').checked = !!p.manual?.closed;
   $('#pdNote').value = p.note || '';
   $('#pdTicket').value = p.ticket ?? '';
+  $('#pdFixed').value = p.fixedTime || '';
   $('#pdTicketCur').textContent = cur(T()) || '金额';
   const osmFee = p.fee === 'yes' ? `地图资料：要收费${p.charge ? `（${p.charge}）` : ''}` : p.fee === 'no' ? '地图资料：免费' : p.charge ? `地图资料：${p.charge}` : '';
   $('#pdTicketHint').textContent = osmFee || '不知道就留空；免费就填 0';
@@ -5413,6 +5641,10 @@ $('#placeForm').addEventListener('submit', () => {
   p.stayMin = Math.max(0, Number($('#pdStay').value) || 0);
   p.note = $('#pdNote').value.trim();
   p.ticket = $('#pdTicket').value === '' ? null : Math.max(0, Number($('#pdTicket').value) || 0);
+  if (($('#pdFixed').value || null) !== (p.fixedTime || null)) {
+    p.fixedTime = $('#pdFixed').value || null;
+    setManual(T(), isMulti(T()) ? p.day : null, null); // 时间变了：重新排最顺的顺序
+  }
   const open = $('#pdOpen').value;
   const close = $('#pdClose').value;
   p.manual = $('#pdClosed').checked ? { closed: true } : open && close ? { open, close } : null;
