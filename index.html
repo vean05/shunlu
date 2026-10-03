@@ -18,7 +18,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <!-- 所有文件都放在同一层（没有文件夹），上传 GitHub 比较方便。改了 style.css / app.js 就把 v= 加一，手机才会拿到新版 -->
-  <link rel="stylesheet" href="style.css?v=20">
+  <link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 
@@ -263,12 +263,12 @@
     <!-- 地图分页：下一站卡片 -->
     <div id="nextCard"></div>
 
-    <!-- 每天分页：每天的安排（列表 / 看板）、点一天看时间线 -->
+    <!-- 每天分页：每天的安排（列表 / 调整安排）、点一天看时间线 -->
     <section id="sheet" class="tpage" data-state="full" hidden>
       <div id="sheetHead">
         <div id="daysMode" class="seg days-mode" hidden>
-          <label><input type="radio" name="daysMode" value="list"><span>列表</span></label>
-          <label><input type="radio" name="daysMode" value="board"><span>看板 · 拖动调整</span></label>
+          <label><input type="radio" name="daysMode" value="list"><span>每天行程</span></label>
+          <label><input type="radio" name="daysMode" value="board"><span>调整安排</span></label>
         </div>
         <div class="sh-row">
           <div id="summary"></div>
@@ -279,7 +279,7 @@
         <div id="status"></div>
         <div id="dayTabs" class="day-tabs" hidden></div>
         <div id="reorderBar" hidden>
-          <div class="small">按住「拖动」把地点拖到想要的位置。要换到别天：用上面的「看板」</div>
+          <div class="small">按住「拖动」把地点拖到想要的位置。要换到别天：用上面的「调整安排」</div>
           <div class="rb-btns">
             <button id="btnAutoOrder">恢复最优顺序</button>
             <button id="btnReorderDone" class="primary">完成</button>
@@ -293,9 +293,10 @@
             <label><input type="radio" name="kbMode" value="auto"><span>换到别天后：自动排最顺</span></label>
             <label><input type="radio" name="kbMode" value="keep"><span>照我放的位置</span></label>
           </div>
-          <div class="small muted">按住 <span data-ic="grip"></span> 拖到别天或上下移动；点卡片可以「移到第几天」「固定几点去」。</div>
+          <div class="small muted">按住 <span data-ic="grip"></span> 拖；底下会出现每一天，放上去就换过去</div>
         </div>
         <div id="kbBoard" class="kb-board"></div>
+        <div id="kbDock" hidden></div>
         <div class="kb-foot"><button type="button" id="kbRearrange">全部重新分配（固定的不动）</button></div>
       </div>
     </section>
@@ -318,7 +319,7 @@
         <div class="menu-list more-list">
           <button id="btnEdit"><span data-ic="edit"></span><div><b>修改行程</b><span>城市、日期、天数、出发时间</span></div></button>
           <button id="btnStays"><span data-ic="bed"></span><div><b>住宿 / 换酒店</b><span>每晚住哪里、入住退房时间、住哪一区最顺</span></div></button>
-          <button id="btnBoard"><span data-ic="grip"></span><div><b>拖动调整每天的安排</b><span>看板：换到别天、调顺序、先不去</span></div></button>
+          <button id="btnBoard"><span data-ic="grip"></span><div><b>调整每天的安排</b><span>拖到别天、调顺序、先不去</span></div></button>
           <button id="btnArrange"><span data-ic="calendar"></span><div><b>重新分配每一天</b><span>按地区、休息日重新分（固定的不动）</span></div></button>
         </div>
         <div class="more-sec">出门用</div>
@@ -583,6 +584,6 @@
   <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script type="module" src="app.js?v=20"></script>
+  <script type="module" src="app.js?v=21"></script>
 </body>
 </html>

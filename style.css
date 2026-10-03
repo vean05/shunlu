@@ -1087,3 +1087,48 @@ dialog::backdrop { background: rgba(15, 23, 42, .32); backdrop-filter: blur(2px)
   #mapLegend { bottom: 24px !important; }
   #nextCard { left: 16px; right: auto; width: 420px; margin: 0; }
 }
+
+/* ============ v21：调整安排改成由上往下（手机好拖），拖的时候底下出现每一天 ============ */
+#boardWrap { position: relative; }
+.kb-board { flex-direction: column; gap: 14px; overflow-x: hidden; overflow-y: auto; scroll-snap-type: none; padding: 10px 12px 24px; }
+.kb-col { width: auto; flex: none; overflow: visible; }
+.kb-col header { position: sticky; top: -10px; z-index: 2; background: #fff; border-radius: 18px 18px 0 0; padding: 12px 12px 8px; }
+.kb-h1 { width: 100%; }
+.kb-count { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--muted); }
+.kb-sub { font-size: 12px; color: var(--muted); }
+.kb-sub .kb-warn { display: inline-flex; }
+.kb-list { overflow: visible; min-height: 44px; padding: 8px; gap: 6px; }
+.kb-card { padding: 4px 6px 4px 0; gap: 6px; min-height: 52px; }
+.kb-card .kb-time { flex: none; width: 46px; font-size: 13px; font-weight: 800; color: #2563eb; text-align: left; }
+.kb-card.warn .kb-time { color: var(--warn); }
+.kb-card.bad .kb-time { color: var(--bad); font-size: 12px; }
+.kb-grip { width: 30px; height: 44px; }
+.kb-name { -webkit-line-clamp: 1; font-size: 14.5px; }
+.kb-tags { margin-top: 2px; }
+.kt-warn { background: var(--warn-soft); color: var(--warn); }
+.kb-empty { padding: 12px 10px; }
+/* 拖的时候：底下每一天的按钮 */
+#kbDock {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; padding: 8px 10px calc(10px + var(--safe-b));
+  background: rgba(255, 255, 255, .96); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid var(--line); box-shadow: 0 -10px 30px rgba(16, 24, 40, .14); animation: dock-up .16s ease-out;
+}
+@keyframes dock-up { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+.kd-tip { font-size: 11.5px; font-weight: 700; color: var(--muted); text-align: center; margin-bottom: 6px; }
+.kd-row { display: flex; gap: 6px; }
+.kd-chip {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 9px 2px; border-radius: 14px;
+  background: #f3f5fa; border: 2px solid transparent; transition: transform .12s, background .12s, border-color .12s;
+}
+.kd-chip b { font-size: 13px; color: var(--dc, #475569); }
+.kd-chip span { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.kd-chip.cur { opacity: .55; }
+.kd-chip.park b { color: #475569; }
+.kd-chip.kb-over { background: var(--dc, #64748b); border-color: #fff; transform: scale(1.08); box-shadow: 0 8px 20px rgba(16, 24, 40, .2); opacity: 1; }
+.kd-chip.kb-over b, .kd-chip.kb-over span { color: #fff; }
+.kd-chip.park.kb-over { --dc: #64748b; }
+#sheet.board-on #dayTabs { display: none !important; }
+#sheet.board-on .days-mode { margin-bottom: 6px; }
+#boardWrap .kb-top { gap: 4px; padding-bottom: 4px; }
+#sheet.tpage { top: 0; bottom: var(--tabbar-h); left: 0; right: 0; }
+@media (min-width: 900px) { #sheet.tpage { right: auto; } }

@@ -1,9 +1,9 @@
-import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=20';
-import { optimize, evaluate } from './optimizer.js?v=20';
-import { arrangeDays } from './days.js?v=20';
-import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=20';
-import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=20';
-import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=20';
+import { travelRow, transitPlan, hasCJK, smartSearch, searchPlaces, parseCoords, suggestPlaces, lookupDetails, reverseGeocode, travelTable, routeLine, estimateTable, haversine } from './geo.js?v=21';
+import { optimize, evaluate } from './optimizer.js?v=21';
+import { arrangeDays } from './days.js?v=21';
+import { ic, modeIcon, MODE_COLOR, MODE_NAME } from './icons.js?v=21';
+import { placeHoursOn, minToHHMM, parseOpeningHours } from './hours.js?v=21';
+import { CITY_PRESETS, searchCities, fetchPopular, categoryOf, typeZh, findPhoto, tileThumb, penangDemo, placeDetails, TEMPLATES, pickTemplatePlaces } from './discover.js?v=21';
 
 /* ================= 状态与保存 ================= */
 
@@ -3677,7 +3677,7 @@ function renderOverview(t) {
   }
   const parked = active.filter((p) => p.parked);
   if (parked.length) {
-    html += `<div class="day-card" style="--dc:#cbd5e1"><div class="dc-head" data-board="1"><span class="dc-badge" style="color:#475569">备选</span><div class="dc-h-main"><b>先不去（${parked.length}）</b><span>不排进路线；想去就在看板拖回某一天</span></div><span class="dc-go">看板 ›</span></div>
+    html += `<div class="day-card" style="--dc:#cbd5e1"><div class="dc-head" data-board="1"><span class="dc-badge" style="color:#475569">备选</span><div class="dc-h-main"><b>先不去（${parked.length}）</b><span>不排进路线；想去就在「调整安排」拖回某一天</span></div><span class="dc-go">调整 ›</span></div>
       <div class="dc-list">${parked.map((p) => `<div class="dc-item" data-id="${p.id}"><span class="dc-time"></span><span class="dc-dot"></span><span class="dc-name">${esc(p.name)}</span></div>`).join('')}</div></div>`;
   }
   html += `<p class="small muted center">分配方法：同一区的地点放同一天，避开休息日，每天时间尽量平均。<br>想把某个地点固定在某一天：点它 → 编辑 → 「安排在」</p>`;
@@ -5680,7 +5680,7 @@ function afterTimeChange(msg, day = undefined) {
   save();
   $('#timeDialog').close();
   toast(msg, 3000);
-  // 在看板里改的：只重算那一天
+  // 在「调整安排」里改的：只重算那一天
   if (boardOn() && day) return kbRecompute([day]);
   renderMap();
   replan();
@@ -5717,9 +5717,10 @@ $('#tmClear').addEventListener('click', () => {
 });
 $('#tmCancel').addEventListener('click', () => $('#timeDialog').close());
 
-/* ================= 看板：拖动调整每天的安排（另外一个全屏窗口） ================= */
+/* ================= 调整安排：拖动换到别天、调顺序、先不去 ================= */
 //
-// 每一天一栏，最后一栏是「备选 · 先不去」。
+// 手机画面窄：每一天由上往下排（一直往下滑就看到全部），最后是「备选 · 先不去」。
+// 拖的时候底下会出现「第1天 / 第2天 / … / 先不去」，直接放到那里就换过去（不用滑到那天）。
 //   拖到别天：那个地点会「🔒 固定在那天」（之后按「全部重新分配」也不会被移走）
 //     · 模式「自动排最顺」：放进去后，那天整天重新找最顺的顺序
 //     · 模式「照我放的位置」：照你放的位置排，时间跟着重算
@@ -5746,14 +5747,19 @@ function boardCols(t) {
 function kbCard(p, plan) {
   const st = plan?.stops.find((x) => x.id === p.id);
   const closed = plan?.closedIds?.includes(p.id) || st?.flag === 'closed';
-  const time = p.parked ? '先不去' : closed ? '这天关门 / 休息' : st ? `${fmtClock(st.start)}–${fmtClock(st.depart)}` : kbBusy.has(p.day) ? '计算中…' : p.day ? '等待计算' : '还没分配';
+  const time = p.parked ? '先不去' : closed ? '关门' : st ? fmtClock(st.start) : kbBusy.has(p.day) ? '…' : '--:--';
   const cls = closed ? 'bad' : st?.flag ? 'warn' : '';
+  const tags = [
+    p.fixedTime ? `<span class="kt-time">${ic('pinned', 11)} ${p.checkin ? `${esc(p.fixedTime)} 起入住` : `固定 ${esc(p.fixedTime)}`}</span>` : '',
+    p.dayLocked && p.day ? `<span class="kt-day">${ic('lock', 11)} 固定这天</span>` : '',
+    st?.flag === 'late' ? '<span class="kt-warn">会晚到</span>' : st?.flag === 'short' ? '<span class="kt-warn">快关门</span>' : '',
+  ].join('');
   return `<div class="kb-card ${cls}" data-id="${p.id}">
     <button type="button" class="kb-grip" aria-label="按住拖动">${ic('grip', 18)}</button>
+    <div class="kb-time">${esc(time)}</div>
     <div class="kb-main">
-      <div class="kb-time">${esc(time)}${st?.flag === 'late' ? ' · 会晚到' : st?.flag === 'short' ? ' · 快关门' : ''}</div>
       <div class="kb-name">${esc(p.name)}</div>
-      ${p.fixedTime || (p.dayLocked && p.day) ? `<div class="kb-tags">${p.fixedTime ? `<span class="kt-time">${ic('pinned', 11)} ${p.checkin ? `${esc(p.fixedTime)} 起入住` : `固定 ${esc(p.fixedTime)}`}</span>` : ''}${p.dayLocked && p.day ? `<span class="kt-day">${ic('lock', 11)} 固定这天</span>` : ''}</div>` : ''}
+      ${tags ? `<div class="kb-tags">${tags}</div>` : ''}
     </div>
     <span class="kb-more">${ic('more', 16)}</span>
   </div>`;
@@ -5762,12 +5768,12 @@ function kbCard(p, plan) {
 function renderBoard() {
   const t = T();
   if (!t) return;
-  const scroll = $('#kbBoard').scrollLeft;
+  const scroll = $('#kbBoard').scrollTop;
   $('#kbBoard').innerHTML = boardCols(t)
     .map((c) => {
       if (!c.d) {
         return `<section class="kb-col park" data-day="0">
-          <header><div class="kb-h1"><span class="dc-badge">备选</span><b>先不去</b></div><span>拖进来就不排进路线；想去再拖回某一天</span></header>
+          <header><div class="kb-h1"><span class="dc-badge">备选</span><b>先不去</b><span class="kb-count">${c.items.length} 个</span></div><span class="kb-sub">放这里就不排进路线；想去再拖回某一天</span></header>
           <div class="kb-list">${c.items.map((p) => kbCard(p, null)).join('') || '<div class="kb-empty">拖到这里 = 先不去</div>'}</div></section>`;
       }
       const plan = c.plan;
@@ -5777,9 +5783,8 @@ function renderBoard() {
       const manual = !!getManual(t, c.d);
       return `<section class="kb-col${busy ? ' busy' : ''}" data-day="${c.d}" style="--dc:${dayColor(c.d)}">
         <header>
-          <div class="kb-h1"><span class="dc-badge">第${c.d}天</span><b>${esc(fmtDay(t, c.d))}</b></div>
-          <span>${c.items.length} 个地点${plan?.stops?.length ? ` · ${fmtClock(plan.startTime)}–${fmtClock(end)}` : ''}${busy ? ' · 重新计算中…' : ''}</span>
-          ${late ? `<span class="kb-warn">${ic('alert', 12)} 太满：${fmtClock(end)} 才结束</span>` : ''}
+          <div class="kb-h1"><span class="dc-badge">第${c.d}天</span><b>${esc(fmtDay(t, c.d))}</b><span class="kb-count">${c.items.length} 个</span></div>
+          <span class="kb-sub">${plan?.stops?.length ? `${fmtClock(plan.startTime)}–${fmtClock(end)}` : ''}${busy ? ' 重新计算中…' : ''}${late ? ` <b class="kb-warn">${ic('alert', 12)} 太满，${fmtClock(end)} 才结束</b>` : ''}</span>
           ${manual ? `<button type="button" class="kb-auto" data-auto="${c.d}">${ic('refresh', 13)} 你的顺序 · 改回最顺</button>` : ''}
           ${plan?.stops?.length ? `<div class="kb-bar">${dayBarHtml(t, plan, true)}</div>` : ''}
         </header>
@@ -5787,10 +5792,9 @@ function renderBoard() {
       </section>`;
     })
     .join('');
-  $('#kbBoard').scrollLeft = scroll;
+  $('#kbBoard').scrollTop = scroll;
   document.querySelectorAll('input[name="kbMode"]').forEach((r) => (r.checked = r.value === kbMode()));
 }
-
 
 // 重新算某几天（一天一天来，算好一天就更新那一栏）
 function kbRecompute(days) {
@@ -5856,11 +5860,70 @@ function kbDrop(id, to, ids, idx) {
 
 (function boardDrag() {
   const board = $('#kbBoard');
+  const dock = $('#kbDock');
   let d = null;
   const clearMarks = () => {
     board.querySelector('.kb-line')?.remove();
-    board.querySelectorAll('.kb-over').forEach((c) => c.classList.remove('kb-over'));
+    document.querySelectorAll('.kb-over').forEach((c) => c.classList.remove('kb-over'));
   };
+  // 拖的时候：底下出现每一天的按钮，放上去就换到那天
+  function showDock(fromDay) {
+    const t = T();
+    dock.innerHTML = `<div class="kd-tip">放到这里就换过去</div><div class="kd-row">${Array.from({ length: t.days }, (_, i) => i + 1)
+      .map((x) => `<div class="kd-chip${x === fromDay ? ' cur' : ''}" data-dock="${x}" style="--dc:${dayColor(x)}"><b>第${x}天</b><span>${esc(fmtDay(t, x).replace(/\s.*$/, ''))}</span></div>`)
+      .join('')}<div class="kd-chip park" data-dock="0"><b>先不去</b><span>备选</span></div></div>`;
+    dock.hidden = false;
+  }
+  // 找手指下面是哪一天的哪个位置
+  function locate(x, y) {
+    clearMarks();
+    const el = document.elementFromPoint(x, y);
+    const chip = el?.closest('[data-dock]');
+    if (chip) {
+      chip.classList.add('kb-over');
+      const day = Number(chip.dataset.dock);
+      const col = board.querySelector(`.kb-col[data-day="${day}"]`);
+      const ids = [...col.querySelectorAll('.kb-card:not(.kb-placeholder)')].map((c) => c.dataset.id);
+      return { day, ids, idx: ids.length, key: `dock:${day}` };
+    }
+    const col = el?.closest('.kb-col');
+    if (!col) return null;
+    col.classList.add('kb-over');
+    const list = col.querySelector('.kb-list');
+    const cards = [...list.querySelectorAll('.kb-card:not(.kb-placeholder)')];
+    let idx = cards.findIndex((c) => {
+      const rr = c.getBoundingClientRect();
+      return y < rr.top + rr.height / 2;
+    });
+    if (idx < 0) idx = cards.length;
+    const line = document.createElement('div');
+    line.className = 'kb-line';
+    if (idx < cards.length) list.insertBefore(line, cards[idx]);
+    else list.appendChild(line);
+    return { day: Number(col.dataset.day), ids: cards.map((c) => c.dataset.id), idx, key: `${col.dataset.day}:${idx}` };
+  }
+  function update() {
+    d.target = locate(d.x, d.y);
+    const key = d.target?.key || '';
+    if (key !== d.key) {
+      d.key = key;
+      if (key) buzz(5);
+    }
+  }
+  // 手指停在上下边缘：列表一直自己滑
+  function autoScroll() {
+    if (!d) return;
+    const br = board.getBoundingClientRect();
+    const dockTop = dock.hidden ? br.bottom : dock.getBoundingClientRect().top;
+    let v = 0;
+    if (d.y < br.top + 60) v = -Math.ceil((br.top + 60 - d.y) / 4);
+    else if (d.y > dockTop - 60 && d.y < dockTop) v = Math.ceil((d.y - (dockTop - 60)) / 4);
+    if (v) {
+      board.scrollTop += v;
+      update();
+    }
+    d.raf = requestAnimationFrame(autoScroll);
+  }
   board.addEventListener('pointerdown', (e) => {
     const g = e.target.closest('.kb-grip');
     if (!g) return;
@@ -5872,55 +5935,32 @@ function kbDrop(id, to, ids, idx) {
     Object.assign(ghost.style, { width: `${r.width}px`, left: `${r.left}px`, top: `${r.top}px` });
     $('#boardWrap').appendChild(ghost);
     card.classList.add('kb-placeholder');
-    d = { id: card.dataset.id, card, ghost, dx: e.clientX - r.left, dy: e.clientY - r.top, target: null, key: '' };
+    const from = Number(card.closest('.kb-col').dataset.day);
+    d = { id: card.dataset.id, card, ghost, dx: e.clientX - r.left, dy: e.clientY - r.top, x: e.clientX, y: e.clientY, target: null, key: '' };
     try {
       g.setPointerCapture(e.pointerId);
     } catch {}
+    showDock(from);
+    d.raf = requestAnimationFrame(autoScroll);
     buzz();
   });
   board.addEventListener('pointermove', (e) => {
     if (!d) return;
+    d.x = e.clientX;
+    d.y = e.clientY;
     d.ghost.style.left = `${e.clientX - d.dx}px`;
     d.ghost.style.top = `${e.clientY - d.dy}px`;
-    // 拖到边边：看板自己左右滑、那一栏自己上下滑
-    const br = board.getBoundingClientRect();
-    if (e.clientX < br.left + 36) board.scrollLeft -= 14;
-    else if (e.clientX > br.right - 36) board.scrollLeft += 14;
-    const col = document.elementFromPoint(e.clientX, e.clientY)?.closest('.kb-col');
-    clearMarks();
-    if (!col) {
-      d.target = null;
-      return;
-    }
-    col.classList.add('kb-over');
-    const list = col.querySelector('.kb-list');
-    const lr = list.getBoundingClientRect();
-    if (e.clientY < lr.top + 30) list.scrollTop -= 10;
-    else if (e.clientY > lr.bottom - 30) list.scrollTop += 10;
-    const cards = [...list.querySelectorAll('.kb-card:not(.kb-placeholder)')];
-    let idx = cards.findIndex((c) => {
-      const rr = c.getBoundingClientRect();
-      return e.clientY < rr.top + rr.height / 2;
-    });
-    if (idx < 0) idx = cards.length;
-    const line = document.createElement('div');
-    line.className = 'kb-line';
-    if (idx < cards.length) list.insertBefore(line, cards[idx]);
-    else list.appendChild(line);
-    const key = `${col.dataset.day}:${idx}`;
-    if (key !== d.key) {
-      d.key = key;
-      buzz(5);
-    }
-    d.target = { day: Number(col.dataset.day), ids: cards.map((c) => c.dataset.id), idx };
+    update();
   });
   const end = () => {
     if (!d) return;
-    const { id, card, ghost, target } = d;
+    const { id, card, ghost, target, raf } = d;
     d = null;
+    cancelAnimationFrame(raf);
     ghost.remove();
     card.classList.remove('kb-placeholder');
     clearMarks();
+    dock.hidden = true;
     if (target) kbDrop(id, target.day, target.ids, target.idx);
   };
   board.addEventListener('pointerup', end);
@@ -6003,7 +6043,7 @@ $('#btnBoard').addEventListener('click', openBoard);
 /* ================= 行程里的 4 个分页：地图 / 每天 / 地点 / 更多 ================= */
 
 let tab = 'map';
-let daysMode = 'list'; // 「每天」分页：list = 列表，board = 看板
+let daysMode = 'list'; // 「每天」分页：list = 列表，board = 调整安排
 let nextFocus = null; // 地图上点了哪个地点（下一站卡片改显示它）
 
 // 打开行程先看哪一页：当天在玩 → 地图；还在规划 → 每天；还没地点 → 地点
@@ -6040,13 +6080,14 @@ $('#tripTabs').addEventListener('click', (e) => {
   setTab(b.dataset.tab);
 });
 
-/* ---- 「每天」分页：列表 / 看板 ---- */
+/* ---- 「每天」分页：每天行程 / 调整安排 ---- */
 
 const boardOn = () => currentView === 'map' && tab === 'days' && daysMode === 'board';
 function setDaysMode(m) {
   daysMode = m;
   document.querySelectorAll('input[name="daysMode"]').forEach((r) => (r.checked = r.value === m));
   $('#boardWrap').hidden = m !== 'board';
+  $('#sheet').classList.toggle('board-on', m === 'board');
   $('#list').hidden = m === 'board';
   document.querySelector('#sheetHead .sh-row').hidden = m === 'board';
   $('#status').hidden = m === 'board';
