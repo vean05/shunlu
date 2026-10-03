@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="顺路">
+  <title>顺路 · 旅行路线</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- 版本号：改了 css / js 就把 v= 加一，手机才会拿到新版 -->
+  <link rel="stylesheet" href="css/style.css?v=11">
+</head>
+<body>
+
+  <!-- ========== 首页 ========== -->
+  <section id="viewTrips" class="view home">
+    <!-- 背景：慢慢飘动的柔和色块 -->
+    <div class="bg-blobs" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="vbody">
+      <div class="hero">
+        <div class="hero-inner">
+          <svg class="hero-route" viewBox="0 0 320 120" aria-hidden="true">
+            <path class="hr-path" d="M14 96 C 70 30, 110 110, 160 62 S 250 14, 304 40"/>
+            <g class="hr-pin" style="--d:0s"><circle cx="14" cy="96" r="7"/></g>
+            <g class="hr-pin" style="--d:.6s"><circle cx="160" cy="62" r="7"/></g>
+            <g class="hr-pin" style="--d:1.2s"><circle cx="304" cy="40" r="7"/></g>
+          </svg>
+          <div class="brand"><img src="icons/icon.svg" alt=""> 顺路</div>
+          <h1>今天要去哪里？</h1>
+          <p>选好想去的地方，帮你分好每一天、排出最顺的路线，还会建议住哪一区最方便。</p>
+          <button id="btnNewTrip" class="btn-hero"><span data-ic="plus"></span>开始规划新行程</button>
+        </div>
+      </div>
+
+      <div class="home-body">
+        <button id="btnDemo" class="demo-card">
+          <div class="demo-img" id="demoImg"></div>
+          <div class="demo-text">
+            <span class="tag">示例</span>
+            <b>马来西亚 · 槟城 3 天</b>
+            <span>15 个地点，自动分好每一天和住宿建议</span>
+          </div>
+          <span class="demo-go" data-ic="chevron"></span>
+        </button>
+
+        <div id="tripSection">
+          <h3 class="section-h">我的行程</h3>
+          <div id="tripList"></div>
+        </div>
+        <div class="trip-tools">
+          <button id="btnExport" class="link">导出备份</button>
+          <button id="btnImport" class="link">导入备份</button>
+          <input type="file" id="importFile" accept="application/json,.json" hidden>
+        </div>
+        <p class="foot-note">地图 © OpenStreetMap 贡献者 · 照片来自维基共享资源<br>全部免费服务 · 行程只存在你的手机里</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========== 规划行程：4 个步骤 ========== -->
+  <section id="viewSetup" class="view" hidden>
+    <header class="vhead">
+      <button id="setupBack" class="icon-btn" aria-label="返回"><span data-ic="back"></span></button>
+      <div class="vtitle" id="setupTitle">新行程</div>
+      <span class="icon-btn"></span>
+    </header>
+    <nav class="steps" id="stepTabs">
+      <button data-step="1"><b>1</b>目的地</button>
+      <button data-step="2"><b>2</b>去哪里</button>
+      <button data-step="3"><b>3</b>住哪里</button>
+      <button data-step="4"><b>4</b>出发</button>
+    </nav>
+    <div class="vbody">
+      <!-- 1. 目的地和日期 -->
+      <div class="step" data-step="1">
+        <h2>去哪里玩？</h2>
+        <p class="lead">选好城市后，会先帮你找出那边的热门景点。</p>
+        <div id="destCard"></div>
+        <div class="city-grid" id="cityPresets"></div>
+        <form class="sbox" id="cityForm" autocomplete="off">
+          <input type="search" id="cityInput" placeholder="其他城市，例如：清迈、Hanoi" enterkeyhint="search">
+          <button type="submit" class="primary">搜索</button>
+        </form>
+        <div class="sres" id="cityResults"></div>
+
+        <h3 class="section-h">玩几天？</h3>
+        <div class="group" id="daysGroup">
+          <div class="days-row">
+            <button type="button" data-days="-1" aria-label="少一天">−</button>
+            <div class="days-val"><b id="daysVal">1</b> 天</div>
+            <button type="button" data-days="1" aria-label="多一天">＋</button>
+          </div>
+          <label class="inline">第一天 <input id="startDate" type="date"></label>
+          <div class="small muted" id="daysHint"></div>
+        </div>
+      </div>
+
+      <!-- 2. 想去的地方 -->
+      <div class="step" data-step="2" hidden>
+        <h2>想去哪些地方？</h2>
+        <p class="lead">从热门景点挑，或自己搜索。点照片可以看介绍和位置。<b>顺序和哪天去都不用管</b>，会自动帮你排。</p>
+        <div id="placeSearch"></div>
+        <div id="popularBox">
+          <h3 class="section-h" id="popularTitle">热门景点</h3>
+          <div class="chips" id="popularCats"></div>
+          <div id="popularList"></div>
+        </div>
+        <h3 class="section-h">已添加 <span id="placeCount">0</span> 个地点</h3>
+        <div id="setupPlaces"></div>
+      </div>
+
+      <!-- 3. 住哪里 -->
+      <div class="step" data-step="3" hidden>
+        <h2>住哪里？</h2>
+        <p class="lead">已经订好就直接搜索酒店；还没订的话，看看下面的建议，住在哪一区去这些地方最顺。</p>
+        <div id="staySuggest"></div>
+        <h3 class="section-h">你的住宿</h3>
+        <div id="stayList"></div>
+        <div id="homeSearchWrap">
+          <div class="small muted" id="homeSearchLabel"></div>
+          <div id="homeSearch"></div>
+        </div>
+        <button id="skipHome" class="link">不用了，每天从我当时的位置出发 →</button>
+      </div>
+
+      <!-- 4. 出发设置 -->
+      <div class="step" data-step="4" hidden>
+        <h2>怎么出发？</h2>
+        <form id="tripForm" class="form" onsubmit="return false">
+          <label>行程名字<input name="name" placeholder="例如：东京 3 天"></label>
+
+          <div class="group">
+            <div class="group-t">出发时间</div>
+            <label class="check"><input type="radio" name="departMode" value="now"> <span id="nowLabel">现在出发</span></label>
+            <label class="check"><input type="radio" name="departMode" value="at"> 每天 <input name="departAt" type="time"> 出发</label>
+            <label class="inline" id="dayEndWrap">每天最晚 <input name="dayEnd" type="time"> 回到住的地方</label>
+          </div>
+
+          <div class="group">
+            <div class="group-t">从哪里出发</div>
+            <label class="check"><input type="radio" name="startFrom" value="home"> 从住的地方出发 <span class="muted small" id="homeLabel"></span></label>
+            <label class="check"><input type="radio" name="startFrom" value="gps"> 从我当时的位置出发</label>
+            <label class="check"><input type="checkbox" name="returnHome"> 最后回到住的地方</label>
+          </div>
+
+          <div class="group">
+            <div class="group-t">交通方式</div>
+            <div class="seg">
+              <label><input type="radio" name="mode" value="auto"><span>自动</span></label>
+              <label><input type="radio" name="mode" value="car"><span>开车</span></label>
+              <label><input type="radio" name="mode" value="foot"><span>走路</span></label>
+              <label><input type="radio" name="mode" value="transit"><span>公交</span></label>
+            </div>
+            <div class="small muted" id="modeHint"></div>
+            <label class="inline">走路最远 <input name="walkMaxM" type="number" min="100" step="100" inputmode="numeric"> 米，超过就开车 / 搭车</label>
+            <label class="inline">每次开车多算 <input name="parkMin" type="number" min="0" step="1" inputmode="numeric"> 分钟（停车）</label>
+          </div>
+
+          <div class="group" id="prefGroup">
+            <div class="group-t">怎么分到每一天</div>
+            <div class="seg">
+              <label><input type="radio" name="arrangePref" value="balanced"><span>每天时间平均</span></label>
+              <label><input type="radio" name="arrangePref" value="shortest"><span>总路程最少</span></label>
+            </div>
+            <div class="small muted" id="prefHint"></div>
+          </div>
+
+          <div class="group">
+            <div class="group-t">其他</div>
+            <label class="inline">每个地点默认停留 <input name="defaultStay" type="number" min="0" step="5" inputmode="numeric"> 分钟</label>
+          </div>
+        </form>
+      </div>
+    </div>
+    <div id="pickBar" hidden>
+      <div class="pb-main"><b>已选 <span id="pickCount">0</span> 个地点</b><span id="pickNames"></span></div>
+      <button type="button" id="pickClear" class="link">清除</button>
+      <button type="button" id="pickAdd" class="primary">加入行程</button>
+    </div>
+    <footer class="vfoot">
+      <button id="setupPrev">上一步</button>
+      <button id="setupNext" class="primary">下一步</button>
+    </footer>
+  </section>
+
+  <!-- ========== 地图 ========== -->
+  <section id="viewMap" class="view" hidden>
+    <div id="map"></div>
+    <header id="mapTop">
+      <button id="mapBack" class="icon-btn" aria-label="回首页"><span data-ic="back"></span></button>
+      <div class="mt-title"><div id="tripTitle"></div><div id="tripSub"></div></div>
+      <button id="btnMenu" class="icon-btn" aria-label="更多功能"><span data-ic="more"></span></button>
+    </header>
+    <div id="mapLegend" hidden></div>
+    <div id="geoPrompt" hidden>
+      <span id="gpText"></span>
+      <div class="gp-btns"><button type="button" id="gpNo">不是</button><button type="button" id="gpYes" class="primary">是，去过了</button></div>
+    </div>
+    <div id="fabs">
+      <button id="btnLocate" class="fab" title="我的位置" aria-label="我的位置"><span data-ic="locate"></span></button>
+      <button id="btnFit" class="fab" title="看全部路线" aria-label="看全部路线"><span data-ic="fit"></span></button>
+      <button id="btnAdd" class="fab-add" aria-label="加地点"><span data-ic="plus"></span><span>地点</span></button>
+    </div>
+    <section id="sheet" data-state="peek">
+      <div id="sheetGrip"><span></span></div>
+      <div id="sheetHead">
+        <div class="sh-row">
+          <div id="summary"></div>
+          <button id="btnReplan" class="icon-btn sm" title="重新计算" aria-label="重新计算"><span data-ic="refresh"></span></button>
+        </div>
+        <div id="status"></div>
+        <div id="dayTabs" class="day-tabs" hidden></div>
+        <div id="reorderBar" hidden>
+          <div class="small">用 ▲ ▼ 移动地点，时间会马上重算</div>
+          <div class="rb-btns">
+            <button id="btnAutoOrder">恢复最优顺序</button>
+            <button id="btnReorderDone" class="primary">完成</button>
+          </div>
+        </div>
+      </div>
+      <div id="list"></div>
+    </section>
+  </section>
+
+  <!-- 更多功能 -->
+  <dialog id="menuDialog" class="action-sheet">
+    <div class="menu-list">
+      <button id="btnReorder"><span data-ic="reorder"></span><div><b>调整顺序</b><span>自己决定先去哪里，时间马上重算</span></div></button>
+      <button id="btnArrange"><span data-ic="calendar"></span><div><b>重新分配每一天</b><span>按地区、休息日重新分</span></div></button>
+      <button id="btnFood"><span data-ic="utensils"></span><div><b>找附近吃的</b><span>按距离列出你附近的餐厅</span></div></button>
+      <button id="btnStays"><span data-ic="bed"></span><div><b>住宿 / 换酒店</b><span>看住哪一区最顺</span></div></button>
+      <button id="btnEdit"><span data-ic="edit"></span><div><b>修改行程</b><span>地点、日期、出发时间</span></div></button>
+      <button id="btnBudget"><span data-ic="wallet"></span><div><b>花费 / 预算</b><span>门票估计、记录每天花了多少</span></div></button>
+      <button id="btnOffline"><span data-ic="download"></span><div><b>离线地图</b><span>出国没网络也能看地图</span></div></button>
+      <button id="btnShare"><span data-ic="share"></span><div><b>分享给朋友</b><span>传一个链接，朋友打开就有一样的行程</span></div></button>
+      <button id="btnAI"><span data-ic="sparkles"></span><div><b>问 AI 建议</b><span>复制行程，贴到 ChatGPT / Gemini</span></div></button>
+    </div>
+    <button class="menu-cancel" id="menuCancel">取消</button>
+  </dialog>
+
+  <!-- 在地图页加地点 -->
+  <dialog id="addDialog" class="full">
+    <div class="dhead">
+      <h3>加地点</h3>
+      <button id="addDone" class="primary">完成</button>
+    </div>
+    <div class="dbody">
+      <div id="addSearch"></div>
+      <p class="small muted">也可以关掉这个窗口，在地图上<b>长按</b>选择地点。</p>
+    </div>
+  </dialog>
+
+  <!-- 地点详情 -->
+  <dialog id="previewDialog" class="full">
+    <div class="dhead">
+      <button id="pvClose" class="icon-btn" aria-label="关闭"><span data-ic="back"></span></button>
+      <h3 id="pvName"></h3>
+      <span class="icon-btn"></span>
+    </div>
+    <div class="dbody">
+      <div id="pvGallery" class="gallery"></div>
+      <div class="dt-head">
+        <div id="pvTitle" class="dt-title"></div>
+        <div id="pvAlt" class="dt-alt"></div>
+        <div id="pvMeta" class="chips-row"></div>
+      </div>
+      <div id="pvPlan"></div>
+      <div id="pvDesc" class="dt-desc"></div>
+      <div id="pvInfo" class="info-list"></div>
+      <div id="pvMap"></div>
+    </div>
+    <div class="vfoot" id="pvFoot"></div>
+  </dialog>
+
+  <!-- 编辑地点 -->
+  <dialog id="placeDialog">
+    <form method="dialog" id="placeForm" class="form">
+      <h3>编辑地点</h3>
+      <label>名字<input id="pdName" required></label>
+      <div class="muted small" id="pdAddress"></div>
+      <label>停留时间（分钟）<input id="pdStay" type="number" min="0" step="5" inputmode="numeric"></label>
+      <div class="chips" id="pdStayChips">
+        <button type="button" data-v="15">15</button><button type="button" data-v="30">30</button>
+        <button type="button" data-v="60">60</button><button type="button" data-v="90">90</button>
+        <button type="button" data-v="120">120</button><button type="button" data-v="180">180</button>
+      </div>
+      <div class="group">
+        <div class="group-t">营业时间</div>
+        <div class="small" id="pdHoursInfo"></div>
+        <div class="row">
+          <label>开门<input id="pdOpen" type="time"></label>
+          <label>关门<input id="pdClose" type="time"></label>
+        </div>
+        <label class="check"><input id="pdClosed" type="checkbox"> 当天休息</label>
+        <button type="button" id="pdClearManual" class="link">清除手动设置，用地图资料</button>
+      </div>
+      <div class="group">
+        <div class="group-t">门票（每人）</div>
+        <div class="row ticket-row"><span id="pdTicketCur">金额</span><input id="pdTicket" type="number" min="0" step="0.5" inputmode="decimal" placeholder="不知道就留空"></div>
+        <div class="small muted" id="pdTicketHint"></div>
+      </div>
+      <label id="pdDayWrap">安排在哪一天<select id="pdDay"></select></label>
+      <label>备注<textarea id="pdNote" rows="2" placeholder="例如：要先买票、想吃的店"></textarea></label>
+      <div class="dialog-actions">
+        <button type="button" id="pdDelete" class="danger">删除</button>
+        <button type="button" id="pdDone">已去过</button>
+        <button type="button" id="pdNav">导航</button>
+        <button type="button" id="pdCancel">取消</button>
+        <button type="submit" class="primary" value="save">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 确认加入已选的地点 -->
+  <dialog id="pickDialog">
+    <div class="pk-box">
+      <h3 id="pkTitle">加入这些地点？</h3>
+      <p class="small muted">不要的按 ✕ 拿掉。加入后还可以在「已添加」里移除。</p>
+      <div id="pkList" class="sres"></div>
+      <div class="dialog-actions">
+        <button type="button" id="pkCancel">再想想</button>
+        <button type="button" id="pkOk" class="primary">确定加入</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 吃饭提醒 -->
+  <dialog id="mealDialog">
+    <div class="pk-box">
+      <div class="ml-ic" data-ic="utensils"></div>
+      <h3 id="mlTitle">要安排吃饭的地方吗？</h3>
+      <p class="small muted" id="mlSub"></p>
+      <div id="mlList" class="sres"></div>
+      <div class="dialog-actions">
+        <button type="button" id="mlNo">今天不用</button>
+        <button type="button" id="mlLater">稍后再问</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 导航分段 -->
+  <dialog id="navDialog">
+    <div class="pk-box">
+      <h3>分段导航</h3>
+      <p class="small muted">Google Maps 一次最多带 3 个途经点，所以分成几段。走完一段再按下一段。</p>
+      <div id="navSegs"></div>
+      <div class="dialog-actions"><button type="button" id="navClose">关闭</button></div>
+    </div>
+  </dialog>
+
+  <!-- 打开朋友分享的行程 -->
+  <dialog id="shareInDialog">
+    <div class="pk-box">
+      <div class="ml-ic si-ic2" data-ic="link"></div>
+      <h3 id="siTitle">朋友分享了行程</h3>
+      <p class="small muted" id="siSub"></p>
+      <div id="siList"></div>
+      <div class="dialog-actions">
+        <button type="button" id="siNo">不用</button>
+        <button type="button" id="siYes" class="primary">加进我的行程</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 花费 / 预算 -->
+  <dialog id="budgetDialog" class="full">
+    <div class="dhead">
+      <button type="button" id="bdClose" class="icon-btn" aria-label="关闭"><span data-ic="back"></span></button>
+      <h3>花费 / 预算</h3>
+      <span class="icon-btn"></span>
+    </div>
+    <div class="dbody">
+      <div class="bd-top">
+        <label class="inline">货币 <input id="bdCurrency" class="bd-cur" placeholder="例如 RM"></label>
+        <div class="days-row bd-people" id="bdPeopleBox"><span class="small muted">人数</span>
+          <button type="button" data-pp="-1" aria-label="少一人">−</button><b id="bdPeople">1</b><button type="button" data-pp="1" aria-label="多一人">＋</button></div>
+      </div>
+      <div id="bdSummary" class="bd-summary"></div>
+      <div id="bdCats"></div>
+      <h3 class="section-h">记一笔</h3>
+      <div class="group bd-form">
+        <div class="row"><input id="bdAmount" type="number" min="0" step="0.5" inputmode="decimal" placeholder="金额"><select id="bdCat"></select></div>
+        <div class="row"><input id="bdTitle" placeholder="写什么（可以不填），例如：午餐、Grab"><select id="bdDay"></select></div>
+        <button type="button" id="bdAdd" class="primary">记一笔</button>
+      </div>
+      <h3 class="section-h">记录</h3>
+      <div id="bdList"></div>
+      <p class="small muted">门票估计 = 每个地点填的票价 × 人数。票价在地点的「编辑」里填。</p>
+    </div>
+  </dialog>
+
+  <!-- 离线地图 -->
+  <dialog id="offlineDialog">
+    <div class="pk-box">
+      <div class="ml-ic si-ic2" data-ic="download"></div>
+      <h3>离线地图</h3>
+      <p class="small" id="ofInfo"></p>
+      <div id="ofBar" class="of-bar" hidden><i></i></div>
+      <p class="small muted" id="ofStatus"></p>
+      <p class="small muted">说明：存的是地图本身。没网络时还是能看地图和已经排好的路线；搜索、照片和重新计算路线需要网络。</p>
+      <div class="dialog-actions">
+        <button type="button" id="ofDel" class="danger">删除离线地图</button>
+        <button type="button" id="ofClose">关闭</button>
+        <button type="button" id="ofGo" class="primary">下载离线地图</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" hidden></div>
+  <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script type="module" src="js/app.js?v=11"></script>
+</body>
+</html>
