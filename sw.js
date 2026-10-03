@@ -1,10 +1,10 @@
 // 离线缓存：App 本身的文件先用网络（保证拿到最新版），没网时用缓存
-const CACHE = 'shunlu-v11';
+const CACHE = 'shunlu-v12';
 // 地图（离线地图也存在这里），换版本时不要删
 const MAP_CACHE = 'shunlu-map';
 const SHELL = [
-  './', 'index.html', 'css/style.css', 'js/app.js', 'js/geo.js', 'js/optimizer.js', 'js/hours.js', 'js/discover.js', 'js/days.js', 'js/icons.js',
-  'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-180.png',
+  './', 'index.html', 'style.css', 'app.js', 'geo.js', 'optimizer.js', 'hours.js', 'discover.js', 'days.js', 'icons.js',
+  'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-180.png',
   'https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js',
   'https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css',
 ];

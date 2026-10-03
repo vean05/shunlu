@@ -8,17 +8,18 @@
 | 文件 | 作用 |
 |---|---|
 | `index.html` | 页面 |
-| `css/style.css` | 样式 |
-| `js/app.js` | 主程序：地图、列表、设置、自动重算 |
-| `js/optimizer.js` | 排顺序的算法（在手机里运行，免费） |
-| `js/geo.js` | 搜索地点、查交通时间、画路线（免费服务器） |
-| `js/hours.js` | 读营业时间 |
-| `js/discover.js` | 城市、热门景点、照片和介绍（Wikidata / 维基百科）、槟城示例 |
-| `js/days.js` | 多天行程：把地点分到每一天 |
-| `js/icons.js` | 界面用的线条图标 |
+| `style.css` | 样式 |
+| `app.js` | 主程序：地图、列表、设置、自动重算 |
+| `optimizer.js` | 排顺序的算法（在手机里运行，免费） |
+| `geo.js` | 搜索地点、查交通时间、画路线（免费服务器） |
+| `hours.js` | 读营业时间 |
+| `discover.js` | 城市、热门景点、照片和介绍（Wikidata / 维基百科）、槟城示例 |
+| `days.js` | 多天行程：把地点分到每一天 |
+| `icons.js` | 界面用的线条图标 |
+| `sw.js`、`manifest.webmanifest`、`icon*.png`、`icon.svg` | 让它可以"安装"到手机主屏幕 |
 
-> 改了 css / js 之后，把 `index.html` 和 `js/app.js` 里的 `?v=7` 都加一（例如 `?v=8`），手机才会马上拿到新版。
-| `sw.js`、`manifest.webmanifest`、`icons/` | 让它可以"安装"到手机主屏幕 |
+> 所有文件都放在同一层，没有文件夹，上传 GitHub 时全部选起来拖进去就好。
+> 改了 `style.css` 或 `app.js` 之后，把 `index.html` 里的 `?v=` 加一，手机才会马上拿到新版。
 
 ## 放上网（免费，大约 10 分钟，只需要做一次）
 
@@ -30,9 +31,8 @@
    - 选 **Public**
    - 按 **Create repository**
 3. 在新页面点 **uploading an existing file**
-4. 打开电脑的 `D:\Travel` 文件夹，把下面这些**全部拖进去**：
-   `index.html`、`manifest.webmanifest`、`sw.js`、`README.md`，以及 `css`、`js`、`icons` 三个文件夹
-   （`.claude` 文件夹不用传）
+4. 打开电脑的 `D:\Travel` 文件夹，按 `Ctrl + A` 全选文件，**全部拖进去**
+   （`.claude` 文件夹和 `开发进度.md` 不用传）
 5. 按页面最下面的 **Commit changes**
 6. 进入这个 repository 的 **Settings** → 左边点 **Pages**
    - Source 选 **Deploy from a branch**

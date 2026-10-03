@@ -10,14 +10,14 @@
   <meta name="apple-mobile-web-app-title" content="顺路">
   <title>顺路 · 旅行路线</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <!-- 版本号：改了 css / js 就把 v= 加一，手机才会拿到新版 -->
-  <link rel="stylesheet" href="css/style.css?v=11">
+  <!-- 所有文件都放在同一层（没有文件夹），上传 GitHub 比较方便。改了 style.css / app.js 就把 v= 加一，手机才会拿到新版 -->
+  <link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
 
@@ -34,7 +34,7 @@
             <g class="hr-pin" style="--d:.6s"><circle cx="160" cy="62" r="7"/></g>
             <g class="hr-pin" style="--d:1.2s"><circle cx="304" cy="40" r="7"/></g>
           </svg>
-          <div class="brand"><img src="icons/icon.svg" alt=""> 顺路</div>
+          <div class="brand"><img src="icon.svg" alt=""> 顺路</div>
           <h1>今天要去哪里？</h1>
           <p>选好想去的地方，帮你分好每一天、排出最顺的路线，还会建议住哪一区最方便。</p>
           <button id="btnNewTrip" class="btn-hero"><span data-ic="plus"></span>开始规划新行程</button>
@@ -419,6 +419,6 @@
   <div id="snackbar" hidden><span id="snackMsg"></span><button id="snackUndo">撤销</button></div>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script type="module" src="js/app.js?v=11"></script>
+  <script type="module" src="app.js?v=12"></script>
 </body>
 </html>
